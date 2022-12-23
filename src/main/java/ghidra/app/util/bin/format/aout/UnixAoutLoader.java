@@ -19,34 +19,40 @@ import java.io.IOException;
 import java.util.*;
 
 import ghidra.app.util.Option;
+import ghidra.app.util.bin.BinaryReader;
 import ghidra.app.util.bin.ByteProvider;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.AbstractProgramWrapperLoader;
 import ghidra.app.util.opinion.LoadSpec;
 import ghidra.framework.model.DomainObject;
+import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.lang.LanguageCompilerSpecPair;
 import ghidra.program.model.listing.Program;
+import ghidra.program.model.mem.Memory;
+import ghidra.program.model.mem.MemoryBlock;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
 /**
- * TODO: Provide class-level documentation that describes what this loader does.
+ * Loads the old UNIX a.out executable format. This style was also used by
+ * UNIX-like systems such as BSD and VxWorks, as well as some early
+ * distributions of Linux.
  */
-public class GhidraUnixAoutLoader extends AbstractProgramWrapperLoader {
+public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 	@Override
 	public String getName() {
 
-		// TODO: Name the loader.  This name must match the name of the loader in the .opinion 
-		// files.
-
-		return "My loader";
+		// Must match the name of the loader in the .opinion files.
+		return "UNIX a.out executable";
 	}
 
 	@Override
 	public Collection<LoadSpec> findSupportedLoadSpecs(ByteProvider provider) throws IOException {
 		List<LoadSpec> loadSpecs = new ArrayList<>();
 
+		// Attempt to parse the header as both little- and big-endian.
+		// It is likely that only one of these will produce sensible values.
 		UnixAoutHeader hdrBE = new UnixAoutHeader(provider, false);
 		UnixAoutHeader hdrLE = new UnixAoutHeader(provider, true);
 		
@@ -69,7 +75,23 @@ public class GhidraUnixAoutLoader extends AbstractProgramWrapperLoader {
 			Program program, TaskMonitor monitor, MessageLog log)
 			throws CancelledException, IOException {
 
-		// TODO: Load the bytes from 'provider' into the 'program'.
+		FlatProgramAPI api = new FlatProgramAPI(program, monitor);
+		final boolean bigEndian = program.getLanguage().isBigEndian();
+		UnixAoutHeader header = new UnixAoutHeader(provider, !bigEndian);
+		Memory mem = program.getMemory();
+
+		final long txtOffset = header.getTextOffset();
+		final long txtSize = header.getTextSize();
+		ghidra.program.model.address.Address addr =
+			program.getAddressFactory().getDefaultAddressSpace().getAddress(0x00000000);
+		/*
+		MemoryBlock block = program.getMemory().createInitializedBlock(".text", addr, txtSize, (byte)0x00, monitor, false);
+		block.setRead(true);
+		block.setWrite(false);
+		block.setExecute(true);
+		byte txtBytes[] = provider.readBytes(txtOffset, txtSize);
+		mem.setBytes(api.toAddr(0x00000000), txtBytes);
+		*/
 	}
 
 	@Override
@@ -78,17 +100,11 @@ public class GhidraUnixAoutLoader extends AbstractProgramWrapperLoader {
 		List<Option> list =
 			super.getDefaultOptions(provider, loadSpec, domainObject, isLoadIntoProgram);
 
-		// TODO: If this loader has custom options, add them to 'list'
-		list.add(new Option("Option name goes here", "Default option value goes here"));
-
 		return list;
 	}
 
 	@Override
 	public String validateOptions(ByteProvider provider, LoadSpec loadSpec, List<Option> options, Program program) {
-
-		// TODO: If this loader has custom options, validate them here.  Not all options require
-		// validation.
 
 		return super.validateOptions(provider, loadSpec, options, program);
 	}
