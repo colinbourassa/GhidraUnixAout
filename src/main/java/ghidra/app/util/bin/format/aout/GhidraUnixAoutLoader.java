@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package ghidraunixaout;
+package ghidra.app.util.bin.format.aout;
 
 import java.io.IOException;
 import java.util.*;
@@ -24,6 +24,7 @@ import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.AbstractProgramWrapperLoader;
 import ghidra.app.util.opinion.LoadSpec;
 import ghidra.framework.model.DomainObject;
+import ghidra.program.model.lang.LanguageCompilerSpecPair;
 import ghidra.program.model.listing.Program;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
@@ -46,9 +47,20 @@ public class GhidraUnixAoutLoader extends AbstractProgramWrapperLoader {
 	public Collection<LoadSpec> findSupportedLoadSpecs(ByteProvider provider) throws IOException {
 		List<LoadSpec> loadSpecs = new ArrayList<>();
 
-		// TODO: Examine the bytes in 'provider' to determine if this loader can load it.  If it 
-		// can load it, return the appropriate load specifications.
-
+		UnixAoutHeader hdrBE = new UnixAoutHeader(provider, false);
+		UnixAoutHeader hdrLE = new UnixAoutHeader(provider, true);
+		
+		if (hdrBE.isValid()) {
+			final String lang = hdrBE.getLanguageSpec();
+			final String comp = hdrBE.getCompilerSpec();
+			loadSpecs.add(new LoadSpec(this, 0, new LanguageCompilerSpecPair(lang, comp), true));
+		}
+		if (hdrLE.isValid()) {
+			final String lang = hdrLE.getLanguageSpec();
+			final String comp = hdrLE.getCompilerSpec();
+			loadSpecs.add(new LoadSpec(this, 0, new LanguageCompilerSpecPair(lang, comp), false));			
+		}
+		
 		return loadSpecs;
 	}
 
