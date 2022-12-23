@@ -25,11 +25,16 @@ import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.AbstractProgramWrapperLoader;
 import ghidra.app.util.opinion.LoadSpec;
 import ghidra.framework.model.DomainObject;
+import ghidra.framework.store.LockException;
 import ghidra.program.flatapi.FlatProgramAPI;
+import ghidra.program.model.address.Address;
+import ghidra.program.model.address.AddressOverflowException;
 import ghidra.program.model.lang.LanguageCompilerSpecPair;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
+import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.mem.MemoryBlock;
+import ghidra.program.model.mem.MemoryConflictException;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
@@ -80,18 +85,43 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		UnixAoutHeader header = new UnixAoutHeader(provider, !bigEndian);
 		Memory mem = program.getMemory();
 
-		final long txtOffset = header.getTextOffset();
 		final long txtSize = header.getTextSize();
-		ghidra.program.model.address.Address addr =
-			program.getAddressFactory().getDefaultAddressSpace().getAddress(0x00000000);
-		/*
-		MemoryBlock block = program.getMemory().createInitializedBlock(".text", addr, txtSize, (byte)0x00, monitor, false);
-		block.setRead(true);
-		block.setWrite(false);
-		block.setExecute(true);
-		byte txtBytes[] = provider.readBytes(txtOffset, txtSize);
-		mem.setBytes(api.toAddr(0x00000000), txtBytes);
-		*/
+		final long datSize = header.getDataSize();
+		final long bssSize = header.getBssSize();
+
+		Address txtAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getTextAddr());
+		Address datAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getDataAddr());
+
+		MemoryBlock txtBlock;
+		MemoryBlock datBlock;
+		try {
+			txtBlock = program.getMemory().createInitializedBlock(".text", txtAddr, txtSize, (byte)0x00, monitor, false);
+			datBlock = program.getMemory().createInitializedBlock(".data", datAddr, datSize, (byte)0x00, monitor, false);
+
+			txtBlock.setRead(true);
+			txtBlock.setWrite(false);
+			txtBlock.setExecute(true);
+
+			datBlock.setRead(true);
+			datBlock.setWrite(true);
+			datBlock.setExecute(false);
+		} catch (LockException | IllegalArgumentException | MemoryConflictException | AddressOverflowException
+				| CancelledException e) {
+			e.printStackTrace();
+		}
+
+		byte txtBytes[] = provider.readBytes(header.getTextOffset(), txtSize);
+		byte datBytes[] = provider.readBytes(header.getDataOffset(), datSize);
+
+		try {
+			mem.setBytes(txtAddr, txtBytes);
+			mem.setBytes(datAddr, datBytes);
+			api.createMemoryBlock(".bss", api.toAddr(header.getBssAddr()), null, bssSize, false);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
+		api.addEntryPoint(api.toAddr(header.getEntryPoint()));
 	}
 
 	@Override
