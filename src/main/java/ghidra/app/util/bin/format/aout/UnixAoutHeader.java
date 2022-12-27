@@ -61,7 +61,7 @@ public class UnixAoutHeader {
 	 *                       little-endian.
 	 * @throws IOException
 	 */
-	UnixAoutHeader(ByteProvider provider, boolean isLittleEndian) throws IOException {
+	public UnixAoutHeader(ByteProvider provider, boolean isLittleEndian) throws IOException {
 		BinaryReader reader = new BinaryReader(provider, isLittleEndian);
 
 		// TODO: this first word might contain some additional flags (in the
@@ -79,13 +79,14 @@ public class UnixAoutHeader {
 		a_drsize = reader.readNextUnsignedInt();
 		binarySize = reader.length();
 
-		exeType = checkExecutableType();
+		checkExecutableType();
 		checkMachineTypeValidity();
 
-		txtOffset = 0;
 		if (exeType == ExecutableType.ZMAGIC) {
 			txtOffset = _N_HDROFF + sizeOfExecHeader;
-		} else if (exeType != ExecutableType.QMAGIC) {
+		} else if (exeType == ExecutableType.QMAGIC) {
+			txtOffset = 0;
+		} else {
 			txtOffset = sizeOfExecHeader;
 		}
 
@@ -247,8 +248,7 @@ public class UnixAoutHeader {
 	 * Returns a flag indicating whether this header contains a representation of a
 	 * valid executable type.
 	 */
-	private ExecutableType checkExecutableType() {
-		ExecutableType type = ExecutableType.UNKNOWN;
+	private void checkExecutableType() {
 		final short exetypeMagic = (short) (a_magic & 0xFFFF);
 
 		switch (exetypeMagic) {
@@ -263,10 +263,13 @@ public class UnixAoutHeader {
 			break;
 		case 0x0CC: // 0314: demand-paged exe w/ header in .text
 			exeType = ExecutableType.QMAGIC;
-		case 0x10B: // 0413: demand-paged executable
 			break;
+		case 0x10B: // 0413: demand-paged executable
+			exeType = ExecutableType.ZMAGIC;
+			break;
+		default:
+			exeType = ExecutableType.UNKNOWN;
 		}
-		return type;
 	}
 
 	/**

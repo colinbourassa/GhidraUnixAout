@@ -89,39 +89,57 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		final long datSize = header.getDataSize();
 		final long bssSize = header.getBssSize();
 
-		Address txtAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getTextAddr());
-		Address datAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getDataAddr());
+		if (txtSize > 0) {
+			Address txtAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getTextAddr());
+			MemoryBlock txtBlock;
+			try {
+				txtBlock = program.getMemory().createInitializedBlock(".text", txtAddr, txtSize, (byte)0x00, monitor, false);
+				txtBlock.setRead(true);
+				txtBlock.setWrite(false);
+				txtBlock.setExecute(true);
+				byte txtBytes[] = provider.readBytes(header.getTextOffset(), txtSize);
+				mem.setBytes(txtAddr, txtBytes);
 
-		MemoryBlock txtBlock;
-		MemoryBlock datBlock;
-		try {
-			txtBlock = program.getMemory().createInitializedBlock(".text", txtAddr, txtSize, (byte)0x00, monitor, false);
-			datBlock = program.getMemory().createInitializedBlock(".data", datAddr, datSize, (byte)0x00, monitor, false);
-
-			txtBlock.setRead(true);
-			txtBlock.setWrite(false);
-			txtBlock.setExecute(true);
-
-			datBlock.setRead(true);
-			datBlock.setWrite(true);
-			datBlock.setExecute(false);
-		} catch (LockException | IllegalArgumentException | MemoryConflictException | AddressOverflowException
-				| CancelledException e) {
-			e.printStackTrace();
+			} catch (MemoryAccessException | LockException | IllegalArgumentException | MemoryConflictException | AddressOverflowException e) {
+				e.printStackTrace();
+			}
 		}
 
-		byte txtBytes[] = provider.readBytes(header.getTextOffset(), txtSize);
-		byte datBytes[] = provider.readBytes(header.getDataOffset(), datSize);
+		if (datSize > 0) {
+			Address datAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getDataAddr());
+			MemoryBlock datBlock;
+			try {
+				datBlock = program.getMemory().createInitializedBlock(".data", datAddr, datSize, (byte)0x00, monitor, false);
+				datBlock.setRead(true);
+				datBlock.setWrite(true);
+				datBlock.setExecute(false);
+				byte datBytes[] = provider.readBytes(header.getDataOffset(), datSize);
+				mem.setBytes(datAddr, datBytes);
 
-		try {
-			mem.setBytes(txtAddr, txtBytes);
-			mem.setBytes(datAddr, datBytes);
-			api.createMemoryBlock(".bss", api.toAddr(header.getBssAddr()), null, bssSize, false);
-		} catch (Exception e) {
-			e.printStackTrace();
+			} catch (MemoryAccessException | LockException | IllegalArgumentException | MemoryConflictException | AddressOverflowException e) {
+				e.printStackTrace();
+			}			
 		}
 
-		api.addEntryPoint(api.toAddr(header.getEntryPoint()));
+		if (bssSize > 0) {
+			try {
+				api.createMemoryBlock(".bss", api.toAddr(header.getBssAddr()), null, bssSize, false);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+
+		BinaryReader reader = new BinaryReader(provider, !bigEndian);
+
+		Vector<UnixAoutSymbolTableEntry> symtab =
+			getSymbolTable(reader, header.getSymOffset(), header.getSymSize(), header.getStrOffset());
+
+		Vector<UnixAoutRelocationTableEntry> txtRelocTab =
+			getRelocationTable(reader, header.getTextRelocOffset(), header.getTextRelocSize());
+
+		Vector<UnixAoutRelocationTableEntry> datRelocTab =
+			getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
+		
 	}
 
 	@Override
@@ -137,5 +155,66 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	public String validateOptions(ByteProvider provider, LoadSpec loadSpec, List<Option> options, Program program) {
 
 		return super.validateOptions(provider, loadSpec, options, program);
+	}
+
+	/**
+	 * Reads a single relocation table for either text or data relocations, depending
+	 * on the offset/length provided.
+	 * @param reader Source of file data
+	 * @param offset File byte offset to the start of the relocation table
+	 * @param len Length of the relocation table in bytes
+	 * @return Vector of relocation table entries
+	 */
+	private Vector<UnixAoutRelocationTableEntry> getRelocationTable(BinaryReader reader, long offset, long len) {
+		Vector<UnixAoutRelocationTableEntry> relocTable = new Vector<UnixAoutRelocationTableEntry>();
+		reader.setPointerIndex(offset);
+
+		try {
+			while (reader.getPointerIndex() < (offset + len)) {
+				long address = reader.readNextUnsignedInt();
+				long flags = reader.readNextUnsignedInt();
+				relocTable.add(new UnixAoutRelocationTableEntry(address, flags));
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return relocTable;
+	}
+
+	/**
+	 * Reads all the symbol table entries from the file, returning their representation.
+	 * @param reader Source of file data
+	 * @param offset File byte offset to the start of the symbol table
+	 * @param len Length of the symbol table in bytes
+	 * @param strTabBaseOffset File byte offset to the start of the string table (containing symbol names)
+	 * @return Vector of symbol table entries
+	 */
+	private Vector<UnixAoutSymbolTableEntry> getSymbolTable(BinaryReader reader, long offset, long len, long strTabBaseOffset) {
+		Vector<UnixAoutSymbolTableEntry> symtab = new Vector<UnixAoutSymbolTableEntry>();
+		reader.setPointerIndex(offset);
+
+		try {
+			// read each symbol table entry
+			while (reader.getPointerIndex() < (offset + len)) {
+				long strOffset = reader.readNextUnsignedInt();
+				byte typeByte = reader.readNextByte();
+				byte otherByte = reader.readNextByte();
+				short desc = reader.readNextShort();
+				long value = reader.readNextUnsignedInt();
+				symtab.add(new UnixAoutSymbolTableEntry(strOffset, typeByte, otherByte, desc, value));
+			}
+
+			// lookup and set each string table symbol name
+			for (Integer i = 0; i < symtab.size(); i++) {
+				String symstr = reader.readAsciiString(strTabBaseOffset + symtab.get(i).nameStringOffset);
+				symtab.get(i).name = symstr;
+			}
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+
+		return symtab;
 	}
 }
