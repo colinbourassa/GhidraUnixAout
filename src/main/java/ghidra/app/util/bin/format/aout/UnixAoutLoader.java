@@ -111,7 +111,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			try {
 				InputStream txtStream = provider.getInputStream(header.getTextOffset());
 				txtBlock = program.getMemory().createInitializedBlock(
-					filename + ".text", txtAddr, txtStream, txtSize, null, isOverlay);
+					filename + ".text", txtAddr, txtStream, txtSize, monitor, isOverlay);
 				txtBlock.setRead(true);
 				txtBlock.setWrite(false);
 				txtBlock.setExecute(true);
@@ -125,7 +125,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			try {
 				InputStream datStream = provider.getInputStream(header.getDataOffset());
 				txtBlock = program.getMemory().createInitializedBlock(
-					filename + ".data", datAddr, datStream, datSize, null, isOverlay);
+					filename + ".data", datAddr, datStream, datSize, monitor, isOverlay);
 				txtBlock.setRead(true);
 				txtBlock.setWrite(true);
 				txtBlock.setExecute(false);
@@ -136,7 +136,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 		if (bssSize > 0) {
 			try {
-				api.createMemoryBlock(".bss", api.toAddr(header.getBssAddr()), null, bssSize, false);
+				api.createMemoryBlock(".bss", api.toAddr(header.getBssAddr()), null, bssSize, isOverlay);
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
@@ -161,21 +161,21 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 			// TODO: There are other flags/fields in the relocation table entry that need to be
 			// taken into account (e.g. size of the pointer, offset relativity)
-			
+			UnixAoutSymbolTableEntry sym = symtab.elementAt((int) relocationEntry.symbolNum);
+
 			if (relocationEntry.extern) {
 				Address relocAddr = thisTextAddrSpace.getAddress(relocationEntry.address);
 				if (txtBlock.contains(relocAddr)) {
-					UnixAoutSymbolTableEntry sym = symtab.elementAt((int) relocationEntry.symbolNum);
-			
+
 					// TODO: is getGlobalFunctions appropriate? It works when an A.out object file
-					// is being loaded into 
+					// is being loaded into an existing program
 					List<Function> funcs = program.getListing().getGlobalFunctions(sym.name);
-					
+
 					if (funcs.size() > 0) {
-						
+
 						// for now, we're just taking the first function with that name
 						Address funcAddr = funcs.get(0).getEntryPoint();
-						
+
 						// TODO: take the pointer size and endianness into account.
 						// TODO: is it possible that we may sometimes need to use an absolute address
 						// as opposed to an offset from the current location?
@@ -192,10 +192,13 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 						} catch (MemoryAccessException e) {
 							e.printStackTrace();
 						}
+					} else {
+						log.appendMsg("Symbol'" + sym.name + "' was not found in global function list.");
 					}
 				}
 			} else {
 				// TODO: if the relocation is not marked as external
+				log.appendMsg("AOUT: Symbol '" + sym.name + "' is not marked as external.");
 			}
 		}
 		// TODO: iterate through the data relocation table as well
