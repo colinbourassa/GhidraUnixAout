@@ -116,6 +116,13 @@ public class UnixAoutHeader {
 	public String getCompilerSpec() {
 		return compilerSpec;
 	}
+	
+	/**
+	 * Returns the enumerated type of executable contained in this A.out file.
+	 */
+	public ExecutableType getExecutableType() {
+		return exeType;
+	}
 
 	/**
 	 * Returns an indication of whether this header's fields are all valid; this
