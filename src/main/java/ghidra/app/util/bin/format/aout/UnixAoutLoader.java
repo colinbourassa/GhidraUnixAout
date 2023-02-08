@@ -92,14 +92,14 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		FlatProgramAPI api = new FlatProgramAPI(program, monitor);
 		final boolean bigEndian = program.getLanguage().isBigEndian();
 		UnixAoutHeader header = new UnixAoutHeader(provider, !bigEndian);
-		String filename = provider.getFile().getName();
+		final String filename = provider.getFile().getName();
 
 		final long textSize = header.getTextSize();
 		final long dataSize = header.getDataSize();
 		final long bssSize = header.getBssSize();
 		
 		// TODO: confirm whether it is appropriate to load OMAGIC A.out files as overlays
-		boolean isOverlay = (header.getExecutableType() == ExecutableType.OMAGIC);
+		final boolean isOverlay = (header.getExecutableType() == ExecutableType.OMAGIC);
 		
 		// TODO: loading an A.out into an existing program as an overlay seems to create it
 		// in the 'OverlayAddressSpace'. Do we need to more explicitly create (or rename) the
@@ -144,7 +144,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 		if (bssSize > 0) {
 			try {
-				bssBlock = api.createMemoryBlock(".bss",
+				bssBlock = api.createMemoryBlock(filename + ".bss",
 					api.toAddr(header.getBssAddr()), null, bssSize, isOverlay);
 				bssAddrSpace = bssBlock.getStart().getAddressSpace();
 			} catch (Exception e) {
@@ -163,8 +163,6 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		Vector<UnixAoutRelocationTableEntry> dataRelocTab =
 			getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
 
-		int defaultAddrSpaceId = program.getAddressFactory().getDefaultAddressSpace().getSpaceID();
-		
 		// look through the symbol table to find any that are local,
 		// and apply the names at the appropriate locations
 		for (Integer i = 0; i < symTab.size(); i++) {
