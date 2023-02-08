@@ -105,6 +105,13 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		// in the 'OverlayAddressSpace'. Do we need to more explicitly create (or rename) the
 		// address space so that any subsequent A.out files can have their content differentiated?
 
+		Namespace namespace = null;
+		try {
+			namespace = api.createNamespace(program.getGlobalNamespace(), filename);
+		} catch (DuplicateNameException | InvalidInputException e1) {
+			e1.printStackTrace();
+		}
+
 		MemoryBlock textBlock = null;
 		MemoryBlock dataBlock = null;
 		MemoryBlock bssBlock = null;
@@ -163,22 +170,30 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		Vector<UnixAoutRelocationTableEntry> dataRelocTab =
 			getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
 
+		Hashtable<String,Long> possibleBssSymbols = new Hashtable<String,Long>();
+
 		// look through the symbol table to find any that are local,
 		// and apply the names at the appropriate locations
 		for (Integer i = 0; i < symTab.size(); i++) {
 			UnixAoutSymbolTableEntry symTabEntry = symTab.elementAt(i);
 			try {
 				if (symTabEntry.value != 0) {
+					// TODO: check that the address space can contain the address before calling createLabel()
 					if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_TEXT) {
-						// TODO: establish namespace earlier so that it may be used here
 						api.createLabel(textAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
-							null, true, SourceType.IMPORTED);
+							namespace, true, SourceType.IMPORTED);
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_DATA) {
 						api.createLabel(dataAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
-							null, true, SourceType.IMPORTED);
+							namespace, true, SourceType.IMPORTED);
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_BSS) {
 						api.createLabel(bssAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
-							null, true, SourceType.IMPORTED);
+							namespace, true, SourceType.IMPORTED);
+					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_UNDF) {
+						// This is a special case given by the A.out spec: if the linker cannot find this
+						// symbol in any of the other binary files, then the fact that it is marked as
+						// N_UNDF but has a non-zero value means that its value should be interpreted as
+						// a size, and the linker should allocate space in .bss for it.
+						possibleBssSymbols.put(symTabEntry.name, symTabEntry.value);
 					}
 				}
 			} catch (Exception e) {
@@ -196,34 +211,28 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 			if (relocationEntry.extern) {
 				Address relocAddr = textAddrSpace.getAddress(relocationEntry.address);
+
 				if (textBlock.contains(relocAddr)) {
-
-					// TODO: is getGlobalFunctions appropriate? It works when an A.out object file
-					// is being loaded into an existing program
 					List<Function> funcs = program.getListing().getGlobalFunctions(sym.name);
+					List<Symbol> symbolsGlobal = api.getSymbols(sym.name, null);
+					List<Symbol> symbolsLocal = api.getSymbols(sym.name, namespace);
+
 					if (funcs.size() > 0) {
-
-						// for now, we're just taking the first function with that name
 						Address funcAddr = funcs.get(0).getEntryPoint();
-
-						// TODO: take the pointer size and endianness into account.
-						// TODO: is it possible that we may sometimes need to use an absolute address
-						// as opposed to an offset from the current location?
-						long displacement = funcAddr.getOffset() - relocAddr.getOffset();
-						byte[] displacementBytes = new byte[] {
-							(byte) ((displacement >> 24) & 0xff),
-							(byte) ((displacement >> 16) & 0xff),
-							(byte) ((displacement >> 8) & 0xff),
-							(byte) ((displacement >> 0) & 0xff),
-						};
-
-						try {
-							textBlock.putBytes(relocAddr, displacementBytes);
-						} catch (MemoryAccessException e) {
-							e.printStackTrace();
-						}
+						fixAddress(textBlock, relocAddr, funcAddr);
+						
+					} else if (symbolsGlobal.size() > 0) {
+						Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
+						fixAddress(textBlock, relocAddr, globalSymbolAddr);
+						
+					} else if (symbolsLocal.size() > 0) {
+						Address localSymbolAddr = symbolsLocal.get(0).getAddress();
+						fixAddress(textBlock, relocAddr, localSymbolAddr);
+						
+					} else if (possibleBssSymbols.containsKey(sym.name)) {
+						log.appendMsg("Symbol '" + sym.name + "' needs allocation in .bss!");
 					} else {
-						log.appendMsg("Symbol'" + sym.name + "' was not found in global function list.");
+						log.appendMsg("Symbol '" + sym.name + "' was not found and was not a candidate for allocation in .bss.");
 					}
 				}
 			} else {
@@ -234,8 +243,22 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		// TODO: iterate through the data relocation table as well
 	}
 	
-	private boolean fixAddress(MemoryBlock block, Address pointerLocation, long newAddress) {
-		return false;
+	private void fixAddress(MemoryBlock block, Address pointerLocation, Address newAddress) {
+
+		// TODO: take the pointer size and endianness into account.
+		final long displacement = newAddress.getOffset() - pointerLocation.getOffset();
+		byte[] displacementBytes = new byte[] {
+			(byte) ((displacement >> 24) & 0xff),
+			(byte) ((displacement >> 16) & 0xff),
+			(byte) ((displacement >> 8) & 0xff),
+			(byte) ((displacement >> 0) & 0xff),
+		};
+
+		try {
+			block.putBytes(pointerLocation, displacementBytes);
+		} catch (MemoryAccessException e) {
+			e.printStackTrace();
+		}
 	}
 	
 	@Override
