@@ -16,13 +16,16 @@ public class UnixAoutSymbolTableEntry {
 	public byte otherByte;
 	public short desc;
 	public long value;
+	public boolean isExt;
 	
 	public UnixAoutSymbolTableEntry(long nameStringOffset, byte typeByte, byte otherByte, short desc, long value) {
 		this.nameStringOffset = nameStringOffset;
 		this.otherByte = otherByte;
 		this.desc = desc;
 		this.value = value;
-		switch (typeByte) {
+		this.isExt = (typeByte & 1) == 1;
+		
+		switch (typeByte & 0xfe) {
 		case 1:
 			type = SymbolType.N_EXT;
 			break;
