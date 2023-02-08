@@ -7,8 +7,8 @@ package ghidra.app.util.bin.format.aout;
 public class UnixAoutSymbolTableEntry {
 	
 	// TODO: there may be additional symbol types that are defined and that
-	// need special handling.
-	enum SymbolType { N_UNDF, N_ABS, N_TEXT, N_DATA, N_BSS, N_FN, N_EXT }
+	// need special handling; these would currently get marked as UNKNOWN
+	enum SymbolType { N_UNDF, N_ABS, N_TEXT, N_DATA, N_BSS, N_FN, N_EXT, UNKNOWN }
 
 	public long nameStringOffset;
 	public String name;
@@ -26,6 +26,9 @@ public class UnixAoutSymbolTableEntry {
 		this.isExt = (typeByte & 1) == 1;
 		
 		switch (typeByte & 0xfe) {
+		case 0:
+			type = SymbolType.N_UNDF;
+			break;
 		case 1:
 			type = SymbolType.N_EXT;
 			break;
@@ -41,7 +44,6 @@ public class UnixAoutSymbolTableEntry {
 		case 8:
 			type = SymbolType.N_BSS;
 			break;
-		case 0:
 		default:
 			type = SymbolType.N_UNDF;
 		}
