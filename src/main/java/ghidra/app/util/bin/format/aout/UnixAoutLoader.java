@@ -38,6 +38,7 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.mem.MemoryConflictException;
+import ghidra.program.model.symbol.SourceType;
 import ghidra.util.exception.CancelledException;
 import ghidra.util.task.TaskMonitor;
 
@@ -93,8 +94,8 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		UnixAoutHeader header = new UnixAoutHeader(provider, !bigEndian);
 		String filename = provider.getFile().getName();
 
-		final long txtSize = header.getTextSize();
-		final long datSize = header.getDataSize();
+		final long textSize = header.getTextSize();
+		final long dataSize = header.getDataSize();
 		final long bssSize = header.getBssSize();
 		
 		// TODO: confirm whether it is appropriate to load OMAGIC A.out files as overlays
@@ -104,31 +105,38 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		// in the 'OverlayAddressSpace'. Do we need to more explicitly create (or rename) the
 		// address space so that any subsequent A.out files can have their content differentiated?
 
-		MemoryBlock txtBlock = null;
+		MemoryBlock textBlock = null;
+		MemoryBlock dataBlock = null;
+		MemoryBlock bssBlock = null;
+		AddressSpace textAddrSpace = null;
+		AddressSpace dataAddrSpace = null;
+		AddressSpace bssAddrSpace = null;
 
-		if (txtSize > 0) {
-			Address txtAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getTextAddr());
+		if (textSize > 0) {
+			Address textAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getTextAddr());
 			try {
-				InputStream txtStream = provider.getInputStream(header.getTextOffset());
-				txtBlock = program.getMemory().createInitializedBlock(
-					filename + ".text", txtAddr, txtStream, txtSize, monitor, isOverlay);
-				txtBlock.setRead(true);
-				txtBlock.setWrite(false);
-				txtBlock.setExecute(true);
+				InputStream textStream = provider.getInputStream(header.getTextOffset());
+				textBlock = program.getMemory().createInitializedBlock(
+					filename + ".text", textAddr, textStream, textSize, monitor, isOverlay);
+				textAddrSpace = textBlock.getStart().getAddressSpace();
+				textBlock.setRead(true);
+				textBlock.setWrite(false);
+				textBlock.setExecute(true);
 			} catch (LockException | IllegalArgumentException | MemoryConflictException | AddressOverflowException e) {
 				e.printStackTrace();
 			}
 		}
 		
-		if (datSize > 0) {
-			Address datAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getDataAddr());
+		if (dataSize > 0) {
+			Address dataAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getDataAddr());
 			try {
-				InputStream datStream = provider.getInputStream(header.getDataOffset());
-				txtBlock = program.getMemory().createInitializedBlock(
-					filename + ".data", datAddr, datStream, datSize, monitor, isOverlay);
-				txtBlock.setRead(true);
-				txtBlock.setWrite(true);
-				txtBlock.setExecute(false);
+				InputStream dataStream = provider.getInputStream(header.getDataOffset());
+				dataBlock = program.getMemory().createInitializedBlock(
+					filename + ".data", dataAddr, dataStream, dataSize, monitor, isOverlay);
+				dataAddrSpace = dataBlock.getStart().getAddressSpace();
+				dataBlock.setRead(true);
+				dataBlock.setWrite(true);
+				dataBlock.setExecute(false);
 			} catch (LockException | IllegalArgumentException | MemoryConflictException | AddressOverflowException e) {
 				e.printStackTrace();
 			}
@@ -136,7 +144,9 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 		if (bssSize > 0) {
 			try {
-				api.createMemoryBlock(".bss", api.toAddr(header.getBssAddr()), null, bssSize, isOverlay);
+				bssBlock = api.createMemoryBlock(".bss",
+					api.toAddr(header.getBssAddr()), null, bssSize, isOverlay);
+				bssAddrSpace = bssBlock.getStart().getAddressSpace();
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
@@ -144,33 +154,55 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 		BinaryReader reader = new BinaryReader(provider, !bigEndian);
 
-		Vector<UnixAoutSymbolTableEntry> symtab =
+		Vector<UnixAoutSymbolTableEntry> symTab =
 			getSymbolTable(reader, header.getSymOffset(), header.getSymSize(), header.getStrOffset());
 
-		Vector<UnixAoutRelocationTableEntry> txtRelocTab =
+		Vector<UnixAoutRelocationTableEntry> textRelocTab =
 			getRelocationTable(reader, header.getTextRelocOffset(), header.getTextRelocSize());
 
-		Vector<UnixAoutRelocationTableEntry> datRelocTab =
+		Vector<UnixAoutRelocationTableEntry> dataRelocTab =
 			getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
 
 		int defaultAddrSpaceId = program.getAddressFactory().getDefaultAddressSpace().getSpaceID();
-		AddressSpace thisTextAddrSpace = txtBlock.getStart().getAddressSpace();
-
-		for (Integer i = 0; i < txtRelocTab.size(); i++) {
-			UnixAoutRelocationTableEntry relocationEntry = txtRelocTab.elementAt(i);
+		
+		// look through the symbol table to find any that are local,
+		// and apply the names at the appropriate locations
+		for (Integer i = 0; i < symTab.size(); i++) {
+			UnixAoutSymbolTableEntry symTabEntry = symTab.elementAt(i);
+			try {
+				if (symTabEntry.value != 0) {
+					if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_TEXT) {
+						// TODO: establish namespace earlier so that it may be used here
+						api.createLabel(textAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
+							null, true, SourceType.IMPORTED);
+					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_DATA) {
+						api.createLabel(dataAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
+							null, true, SourceType.IMPORTED);
+					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_BSS) {
+						api.createLabel(bssAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
+							null, true, SourceType.IMPORTED);
+					}
+				}
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+		}
+		
+		for (Integer i = 0; i < textRelocTab.size(); i++) {
+			UnixAoutRelocationTableEntry relocationEntry = textRelocTab.elementAt(i);
 
 			// TODO: There are other flags/fields in the relocation table entry that need to be
 			// taken into account (e.g. size of the pointer, offset relativity)
-			UnixAoutSymbolTableEntry sym = symtab.elementAt((int) relocationEntry.symbolNum);
+			UnixAoutSymbolTableEntry sym = symTab.elementAt((int) relocationEntry.symbolNum);
 
 			if (relocationEntry.extern) {
-				Address relocAddr = thisTextAddrSpace.getAddress(relocationEntry.address);
-				if (txtBlock.contains(relocAddr)) {
+				Address relocAddr = textAddrSpace.getAddress(relocationEntry.address);
+				if (textBlock.contains(relocAddr)) {
 
 					// TODO: is getGlobalFunctions appropriate? It works when an A.out object file
 					// is being loaded into an existing program
 					List<Function> funcs = program.getListing().getGlobalFunctions(sym.name);
-
 					if (funcs.size() > 0) {
 
 						// for now, we're just taking the first function with that name
@@ -188,7 +220,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 						};
 
 						try {
-							txtBlock.putBytes(relocAddr, displacementBytes);
+							textBlock.putBytes(relocAddr, displacementBytes);
 						} catch (MemoryAccessException e) {
 							e.printStackTrace();
 						}
@@ -203,7 +235,11 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		}
 		// TODO: iterate through the data relocation table as well
 	}
-
+	
+	private boolean fixAddress(MemoryBlock block, Address pointerLocation, long newAddress) {
+		return false;
+	}
+	
 	@Override
 	public List<Option> getDefaultOptions(ByteProvider provider, LoadSpec loadSpec,
 			DomainObject domainObject, boolean isLoadIntoProgram) {
