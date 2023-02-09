@@ -50,6 +50,9 @@ import ghidra.util.task.TaskMonitor;
  * Loads the old UNIX a.out executable format. This style was also used by
  * UNIX-like systems such as BSD and VxWorks, as well as some early
  * distributions of Linux.
+ * 
+ * Although there do exist implementations of A.out with 64-bit and GNU
+ * extensions, this loader does not currently support them. 
  */
 public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
@@ -100,9 +103,10 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 		final long textSize = header.getTextSize();
 		final long dataSize = header.getDataSize();
-		final long bssSize = header.getBssSize();
+		long bssSize = header.getBssSize();
 		
-		// TODO: confirm whether it is appropriate to load OMAGIC A.out files as overlays
+		// TODO: confirm whether it is appropriate to load OMAGIC A.out files as overlays.
+		// (There may be other magic types that make sense to load as overlays as well.)
 		final boolean isOverlay = (header.getExecutableType() == ExecutableType.OMAGIC);
 		
 		// TODO: loading an A.out into an existing program as an overlay seems to create it
@@ -153,16 +157,6 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			}
 		}
 
-		if (bssSize > 0) {
-			try {
-				bssBlock = api.createMemoryBlock(filename + ".bss",
-					api.toAddr(header.getBssAddr()), null, bssSize, isOverlay);
-				bssAddrSpace = bssBlock.getStart().getAddressSpace();
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-		}
-
 		BinaryReader reader = new BinaryReader(provider, !bigEndian);
 
 		Vector<UnixAoutSymbolTableEntry> symTab =
@@ -206,69 +200,99 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			}
 		}
 
-		// Until we search the global symbol table for the symbols in the 'possibleBssSymbols'
-		// list (which will happen as we walk the relocation table, below), we won't know
-		// whether these symbols exist in another binary file and would be resolved at runtime,
-		// or, instead, if we'll need to mimic the linker behavior and allocate space in .bss
-		// for them.
-		MemoryBlock bssAnnex = null;
-		long bssAnnexLocation = 0;
-		if (possibleBssSymbols.size() > 0) {
-			Long totalBssAnnexSize = (long) 0;
-			for (Long symbolSize : possibleBssSymbols.values()) {
-				totalBssAnnexSize += symbolSize;				
-			}
+		// Add up the sizes of all the symbols that are supposed to be allocated
+		// in .bss, and ensure that our .bss segment size can accommodate them.
+		// Until we search the global symbol table for the symbols in the
+		// 'possibleBssSymbols' list (which will happen as we walk the relocation
+		// table, below), we won't know whether these symbols exist in another
+		// binary file that was previously loaded, or, instead, if we'll need to
+		// mimic the linker behavior and assign space in .bss for them.
+		Long requiredBssSize = (long) 0;
+		for (Long symbolSize : possibleBssSymbols.values()) {
+			requiredBssSize += symbolSize;				
+		}
+		
+		if (requiredBssSize > bssSize) {
+			bssSize = requiredBssSize;
+		}
+
+		if (bssSize > 0) {
 			try {
-				bssAnnex = api.createMemoryBlock(filename + ".bss",
-					api.toAddr(header.getBssAddr()), null, totalBssAnnexSize, isOverlay);
+				bssBlock = api.createMemoryBlock(filename + ".bss",
+					api.toAddr(header.getBssAddr()), null, bssSize, isOverlay);
+				bssAddrSpace = bssBlock.getStart().getAddressSpace();
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
 		}
+
+		long bssLocation = processRelocationTable(
+			api, textRelocTab, symTab, textBlock, namespace, bssBlock, possibleBssSymbols, header.getBssAddr(), log);
 		
-		for (Integer i = 0; i < textRelocTab.size(); i++) {
-			UnixAoutRelocationTableEntry relocationEntry = textRelocTab.elementAt(i);
-
-			// TODO: There are other flags/fields in the relocation table entry that need to be
-			// taken into account (e.g. size of the pointer, offset relativity)
-			UnixAoutSymbolTableEntry sym = symTab.elementAt((int) relocationEntry.symbolNum);
-
-			if (relocationEntry.extern) {
-				Address relocAddr = textAddrSpace.getAddress(relocationEntry.address);
-
-				if (textBlock.contains(relocAddr)) {
-					List<Function> funcs = program.getListing().getGlobalFunctions(sym.name);
-					List<Symbol> symbolsGlobal = api.getSymbols(sym.name, null);
-					List<Symbol> symbolsLocal = api.getSymbols(sym.name, namespace);
-
-					if (funcs.size() > 0) {
-						Address funcAddr = funcs.get(0).getEntryPoint();
-						fixAddress(textBlock, relocAddr, funcAddr);
-						
-					} else if (symbolsGlobal.size() > 0) {
-						Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
-						fixAddress(textBlock, relocAddr, globalSymbolAddr);
-						
-					} else if (symbolsLocal.size() > 0) {
-						Address localSymbolAddr = symbolsLocal.get(0).getAddress();
-						fixAddress(textBlock, relocAddr, localSymbolAddr);
-						
-					} else if (possibleBssSymbols.containsKey(sym.name)) {
-						if (addAllocationInBlock(bssAnnex, sym.name, possibleBssSymbols.get(sym.name))) {
-							bssAnnexLocation += possibleBssSymbols.get(sym.name);
-						}
-					} else {
-						log.appendMsg("Symbol '" + sym.name + "' was not found and was not a candidate for allocation in .bss.");
-					}
-				}
-			} else {
-				// TODO: if the relocation is not marked as external
-				log.appendMsg("AOUT: Symbol '" + sym.name + "' is not marked as external.");
-			}
-		}
-		// TODO: iterate through the data relocation table as well
+		processRelocationTable(
+			api, dataRelocTab, symTab, dataBlock, namespace, bssBlock, possibleBssSymbols, bssLocation, log);		
 	}
 	
+	private long processRelocationTable(FlatProgramAPI api,
+										Vector<UnixAoutRelocationTableEntry> relocTable,
+										Vector<UnixAoutSymbolTableEntry> symTab,
+										MemoryBlock block,
+										Namespace namespace,
+										MemoryBlock bssBlock,
+										Hashtable<String,Long> possibleBssSymbols,
+										long currentBssLocation,
+										MessageLog log) {
+		
+		long newBssLocation = currentBssLocation;
+		for (Integer i = 0; i < relocTable.size(); i++) {
+
+			// TODO: There are other flags/fields in the relocation table entry that need to
+			// be taken into account (e.g. size of the pointer, offset relativity)
+			UnixAoutRelocationTableEntry relocationEntry = relocTable.elementAt(i);
+			UnixAoutSymbolTableEntry symbolEntry = symTab.elementAt((int)relocationEntry.symbolNum);
+			AddressSpace addrSpace = block.getStart().getAddressSpace();
+			Address relocAddr = addrSpace.getAddress(relocationEntry.address);
+			
+			if (block.contains(relocAddr)) {
+				
+				List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
+				List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
+				List<Symbol> symbolsLocal = api.getSymbols(symbolEntry.name, namespace);
+				
+				if (funcs.size() > 0) {
+					Address funcAddr = funcs.get(0).getEntryPoint();
+					fixAddress(block, relocAddr, funcAddr);
+
+				} else if (symbolsGlobal.size() > 0) {
+					Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
+					fixAddress(block, relocAddr, globalSymbolAddr);
+
+				} else if (symbolsLocal.size() > 0) {
+					Address localSymbolAddr = symbolsLocal.get(0).getAddress();
+					fixAddress(block, relocAddr, localSymbolAddr);
+				} else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
+					try {
+						api.createLabel(bssBlock.getStart().getAddressSpace().getAddress(newBssLocation),
+							symbolEntry.name, namespace, true, SourceType.IMPORTED);
+						newBssLocation += possibleBssSymbols.get(symbolEntry.name);
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+				} else {
+					log.appendMsg("Symbol '" + symbolEntry.name +
+						"' was not found and was not a candidate for allocation in .bss.");
+				}
+			}
+		}
+		return newBssLocation;
+	}
+	
+	/**
+	 * Rewrites the pointer at the specified location to instead point to the
+	 * provided address.
+	 * TODO: Currently, this is not always being called with the right address.
+	 * The caller must check the relocation table entry flags!
+	 */
 	private void fixAddress(MemoryBlock block, Address pointerLocation, Address newAddress) {
 
 		// TODO: take the pointer size and endianness into account.
@@ -285,11 +309,6 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		} catch (MemoryAccessException e) {
 			e.printStackTrace();
 		}
-	}
-	
-	private boolean addAllocationInBlock(MemoryBlock block, String symbolName, Long size) {
-		// TODO
-		return false;
 	}
 	
 	@Override
