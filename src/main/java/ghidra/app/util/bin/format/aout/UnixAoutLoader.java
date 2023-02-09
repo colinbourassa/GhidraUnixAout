@@ -254,7 +254,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 						fixAddress(textBlock, relocAddr, localSymbolAddr);
 						
 					} else if (possibleBssSymbols.containsKey(sym.name)) {
-						if (addAllocationInBlock(bssBlock, sym.name, possibleBssSymbols.get(sym.name))) {
+						if (addAllocationInBlock(bssAnnex, sym.name, possibleBssSymbols.get(sym.name))) {
 							bssAnnexLocation += possibleBssSymbols.get(sym.name);
 						}
 					} else {
