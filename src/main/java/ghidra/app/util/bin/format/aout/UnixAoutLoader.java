@@ -38,8 +38,12 @@ import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.mem.MemoryConflictException;
+import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.symbol.SourceType;
+import ghidra.program.model.symbol.Symbol;
 import ghidra.util.exception.CancelledException;
+import ghidra.util.exception.DuplicateNameException;
+import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
 
 /**
@@ -111,7 +115,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		} catch (DuplicateNameException | InvalidInputException e1) {
 			e1.printStackTrace();
 		}
-
+		
 		MemoryBlock textBlock = null;
 		MemoryBlock dataBlock = null;
 		MemoryBlock bssBlock = null;
@@ -201,6 +205,26 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				e.printStackTrace();
 			}
 		}
+
+		// Until we search the global symbol table for the symbols in the 'possibleBssSymbols'
+		// list (which will happen as we walk the relocation table, below), we won't know
+		// whether these symbols exist in another binary file and would be resolved at runtime,
+		// or, instead, if we'll need to mimic the linker behavior and allocate space in .bss
+		// for them.
+		MemoryBlock bssAnnex = null;
+		long bssAnnexLocation = 0;
+		if (possibleBssSymbols.size() > 0) {
+			Long totalBssAnnexSize = (long) 0;
+			for (Long symbolSize : possibleBssSymbols.values()) {
+				totalBssAnnexSize += symbolSize;				
+			}
+			try {
+				bssAnnex = api.createMemoryBlock(filename + ".bss",
+					api.toAddr(header.getBssAddr()), null, totalBssAnnexSize, isOverlay);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
 		
 		for (Integer i = 0; i < textRelocTab.size(); i++) {
 			UnixAoutRelocationTableEntry relocationEntry = textRelocTab.elementAt(i);
@@ -230,7 +254,9 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 						fixAddress(textBlock, relocAddr, localSymbolAddr);
 						
 					} else if (possibleBssSymbols.containsKey(sym.name)) {
-						log.appendMsg("Symbol '" + sym.name + "' needs allocation in .bss!");
+						if (addAllocationInBlock(bssBlock, sym.name, possibleBssSymbols.get(sym.name))) {
+							bssAnnexLocation += possibleBssSymbols.get(sym.name);
+						}
 					} else {
 						log.appendMsg("Symbol '" + sym.name + "' was not found and was not a candidate for allocation in .bss.");
 					}
@@ -259,6 +285,11 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		} catch (MemoryAccessException e) {
 			e.printStackTrace();
 		}
+	}
+	
+	private boolean addAllocationInBlock(MemoryBlock block, String symbolName, Long size) {
+		// TODO
+		return false;
 	}
 	
 	@Override
