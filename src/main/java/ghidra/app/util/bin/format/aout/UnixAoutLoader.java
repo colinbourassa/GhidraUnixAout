@@ -169,6 +169,9 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
 
 		Hashtable<String,Long> possibleBssSymbols = new Hashtable<String,Long>();
+		
+		// TODO: collect .text segment functions and disassemble later
+		Vector<Address> localFunctions = new Vector<Address>();
 
 		// look through the symbol table to find any that are local,
 		// and apply the names at the appropriate locations
@@ -180,6 +183,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 					if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_TEXT) {
 						api.createLabel(textAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
 							namespace, true, SourceType.IMPORTED);
+						localFunctions.add(textAddrSpace.getAddress(symTabEntry.value));
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_DATA) {
 						api.createLabel(dataAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
 							namespace, true, SourceType.IMPORTED);
