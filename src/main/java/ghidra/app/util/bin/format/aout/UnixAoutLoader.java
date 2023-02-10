@@ -261,19 +261,21 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				
 				if (funcs.size() > 0) {
 					Address funcAddr = funcs.get(0).getEntryPoint();
-					fixAddress(block, relocAddr, funcAddr);
+					fixAddress(block, relocAddr, funcAddr, relocationEntry.pcRelativeAddressing);
 
 				} else if (symbolsGlobal.size() > 0) {
 					Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
-					fixAddress(block, relocAddr, globalSymbolAddr);
+					fixAddress(block, relocAddr, globalSymbolAddr, relocationEntry.pcRelativeAddressing);
 
 				} else if (symbolsLocal.size() > 0) {
 					Address localSymbolAddr = symbolsLocal.get(0).getAddress();
-					fixAddress(block, relocAddr, localSymbolAddr);
+					fixAddress(block, relocAddr, localSymbolAddr, relocationEntry.pcRelativeAddressing);
 				} else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
 					try {
-						api.createLabel(bssBlock.getStart().getAddressSpace().getAddress(newBssLocation),
+						Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(newBssLocation);
+						api.createLabel(bssSymbolAddress,
 							symbolEntry.name, namespace, true, SourceType.IMPORTED);
+						fixAddress(block, relocAddr, bssSymbolAddress, relocationEntry.pcRelativeAddressing);
 						newBssLocation += possibleBssSymbols.get(symbolEntry.name);
 					} catch (Exception e) {
 						e.printStackTrace();
@@ -293,19 +295,21 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	 * TODO: Currently, this is not always being called with the right address.
 	 * The caller must check the relocation table entry flags!
 	 */
-	private void fixAddress(MemoryBlock block, Address pointerLocation, Address newAddress) {
+	private void fixAddress(MemoryBlock block,
+			Address pointerLocation, Address newAddress, boolean isPcRelative) {
 
 		// TODO: take the pointer size and endianness into account.
-		final long displacement = newAddress.getOffset() - pointerLocation.getOffset();
-		byte[] displacementBytes = new byte[] {
-			(byte) ((displacement >> 24) & 0xff),
-			(byte) ((displacement >> 16) & 0xff),
-			(byte) ((displacement >> 8) & 0xff),
-			(byte) ((displacement >> 0) & 0xff),
+		final long value = isPcRelative ?
+				(newAddress.getOffset() - pointerLocation.getOffset()) : newAddress.getOffset();
+		byte[] valueBytes = new byte[] {
+			(byte) ((value >> 24) & 0xff),
+			(byte) ((value >> 16) & 0xff),
+			(byte) ((value >> 8) & 0xff),
+			(byte) ((value >> 0) & 0xff),
 		};
 
 		try {
-			block.putBytes(pointerLocation, displacementBytes);
+			block.putBytes(pointerLocation, valueBytes);
 		} catch (MemoryAccessException e) {
 			e.printStackTrace();
 		}
