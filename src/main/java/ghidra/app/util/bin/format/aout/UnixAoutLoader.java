@@ -171,7 +171,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
 
 		Hashtable<String,Long> possibleBssSymbols = new Hashtable<String,Long>();
-		Vector<Address> localFunctions = new Vector<Address>();
+		Hashtable<Address,String> localFunctions = new Hashtable<Address,String>();
 
 		// Process the symbol table by applying labels to identify any symbols whose addresses are given		
 		for (Integer i = 0; i < symTab.size(); i++) {
@@ -181,11 +181,9 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 					if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_TEXT) {
 						if (symTabEntry.isExt) {
 							// Save the entry point to this function in a list. Disassembly should wait until
-							// after we've processed the relocation tables; premature disassembly will follow
-							// references to the wrong locations.
+							// after we've processed the relocation tables.
 							Address funcAddr = textAddrSpace.getAddress(symTabEntry.value);
-							localFunctions.add(funcAddr);
-							api.createFunction(funcAddr, symTabEntry.name);							
+							localFunctions.put(funcAddr, symTabEntry.name);
 						}
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_DATA) {
 						api.createLabel(dataAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
@@ -255,12 +253,11 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			// disassemble at its address. Save the address for disassembly later.
 			if (!symbolEntry.isExt) {
 				Address funcAddr = textAddrSpace.getAddress(symbolEntry.value);
-				localFunctions.add(funcAddr);
-				api.createFunction(funcAddr, symbolEntry.name);							
+				localFunctions.put(funcAddr, symbolEntry.name);
 			}
 			
 			if (textBlock.contains(relocAddr)) {
-				
+
 				List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
 				List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
 				List<Symbol> symbolsLocal = api.getSymbols(symbolEntry.name, namespace);
@@ -343,8 +340,9 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 		// Now that all relocation addresses have been rewritten, it's safe to start disassembly
 		// at all the known function entry points.
-		for (Address funcAddr : localFunctions) {
+		for (Address funcAddr : localFunctions.keySet()) {
 			api.disassemble(funcAddr);
+			api.createFunction(funcAddr, localFunctions.get(funcAddr));
 		}
 	}
 	
