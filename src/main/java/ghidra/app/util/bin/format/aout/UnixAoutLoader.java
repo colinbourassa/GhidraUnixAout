@@ -39,6 +39,7 @@ import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.mem.MemoryConflictException;
 import ghidra.program.model.symbol.Namespace;
+import ghidra.program.model.symbol.RefType;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.util.exception.CancelledException;
@@ -264,23 +265,30 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				
 				if (funcs.size() > 0) {
 					Address funcAddr = funcs.get(0).getEntryPoint();
-					fixAddress(textBlock, relocAddr, funcAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(textBlock, relocAddr, funcAddr,
+							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
 
 				} else if (symbolsGlobal.size() > 0) {
 					Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
-					fixAddress(textBlock, relocAddr, globalSymbolAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(textBlock, relocAddr, globalSymbolAddr,
+							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
 
 				} else if (symbolsLocal.size() > 0) {
 					Address localSymbolAddr = symbolsLocal.get(0).getAddress();
-					fixAddress(textBlock, relocAddr, localSymbolAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(textBlock, relocAddr, localSymbolAddr,
+							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
 					
 				} else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
 					try {
 						Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
+						long bssSymbolSize = possibleBssSymbols.get(symbolEntry.name);
 						api.createLabel(bssSymbolAddress,
 							symbolEntry.name, namespace, true, SourceType.IMPORTED);
-						fixAddress(textBlock, relocAddr, bssSymbolAddress, relocationEntry.pcRelativeAddressing);
-						bssLocation += possibleBssSymbols.get(symbolEntry.name);
+						fixAddress(textBlock, relocAddr, bssSymbolAddress,
+								relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+						program.getReferenceManager().addMemoryReference(
+								relocAddr, bssSymbolAddress, RefType.DATA, SourceType.IMPORTED, 0);
+						bssLocation += bssSymbolSize;
 						
 					} catch (Exception e) {
 						e.printStackTrace();
@@ -310,22 +318,28 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				
 				if (funcs.size() > 0) {
 					Address funcAddr = funcs.get(0).getEntryPoint();
-					fixAddress(dataBlock, relocAddr, funcAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(dataBlock, relocAddr, funcAddr,
+							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
 
 				} else if (symbolsGlobal.size() > 0) {
 					Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
-					fixAddress(dataBlock, relocAddr, globalSymbolAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(dataBlock, relocAddr, globalSymbolAddr,
+							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
 
 				} else if (symbolsLocal.size() > 0) {
 					Address localSymbolAddr = symbolsLocal.get(0).getAddress();
-					fixAddress(dataBlock, relocAddr, localSymbolAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(dataBlock, relocAddr, localSymbolAddr,
+							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
 					
 				} else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
 					try {
 						Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
 						api.createLabel(bssSymbolAddress,
 							symbolEntry.name, namespace, true, SourceType.IMPORTED);
-						fixAddress(dataBlock, relocAddr, bssSymbolAddress, relocationEntry.pcRelativeAddressing);
+						fixAddress(dataBlock, relocAddr, bssSymbolAddress,
+								relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+						program.getReferenceManager().addMemoryReference(
+								relocAddr, bssSymbolAddress, RefType.DATA, SourceType.IMPORTED, 0);
 						bssLocation += possibleBssSymbols.get(symbolEntry.name);
 						
 					} catch (Exception e) {
@@ -349,22 +363,29 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	/**
 	 * Rewrites the pointer at the specified location to instead point to the
 	 * provided address.
-	 * TODO: There are more relocation table flags that need to be taken into
-	 * account by the caller, and more parameters that this function needs to
-	 * accommodate things like pointer size and endianness. 
+	 * @param block Memory block in which the pointer to be rewritten exists.
+	 * @param pointerLocation Address at which the pointer to be rewritten is stored.
+	 * @param newAddress Address that is to be written as the new pointer target.
+	 * @param isPcRelative Indicates whether the address is program counter relative,
+	 *  in which case the pointer will be written with the delta between the pointer
+	 *  location and the new destination address. Otherwise it will be written with
+	 *  the absolute address.
+	 * @param isBigEndian True if the program (and therefore the byte order of the
+	 *  pointer) is big endian. False if little endian.
+	 * @param pointerSize 1, 2, and 4-byte pointers are supported.
 	 */
-	private void fixAddress(MemoryBlock block,
-			Address pointerLocation, Address newAddress, boolean isPcRelative) {
+	private void fixAddress(MemoryBlock block, Address pointerLocation, Address newAddress,
+			boolean isPcRelative, boolean isBigEndian, int pointerSize) {
 
 		final long value = isPcRelative ?
 				(newAddress.getOffset() - pointerLocation.getOffset()) : newAddress.getOffset();
-		byte[] valueBytes = new byte[] {
-			(byte) ((value >> 24) & 0xff),
-			(byte) ((value >> 16) & 0xff),
-			(byte) ((value >> 8) & 0xff),
-			(byte) ((value >> 0) & 0xff),
-		};
 
+		byte[] valueBytes = new byte[pointerSize];
+
+		for (int i = 0; i < pointerSize; i++) {
+			int shiftCount = isBigEndian ? (24 - (i * 8)) : (i * 8);
+			valueBytes[i] = (byte)((value >> shiftCount) & 0xff);
+		}
 		try {
 			block.putBytes(pointerLocation, valueBytes);
 		} catch (MemoryAccessException e) {
