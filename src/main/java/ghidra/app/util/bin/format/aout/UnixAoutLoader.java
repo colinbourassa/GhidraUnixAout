@@ -256,7 +256,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				localFunctions.put(funcAddr, symbolEntry.name);
 			}
 			
-			if (textBlock.contains(relocAddr)) {
+			if (relocationEntry.extern && textBlock.contains(relocAddr)) {
 
 				List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
 				List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
