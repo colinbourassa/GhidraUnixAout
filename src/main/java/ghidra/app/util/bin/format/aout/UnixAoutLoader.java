@@ -47,8 +47,8 @@ import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
 
 /**
- * Loads the old UNIX a.out executable format. This style was also used by
- * UNIX-like systems such as BSD and VxWorks, as well as some early
+ * Loads the old UNIX A.out executable format. This style was also used by
+ * UNIX-like systems such as SunOS, BSD, and VxWorks, as well as some early
  * distributions of Linux.
  * 
  * Although there do exist implementations of A.out with 64-bit and GNU
@@ -60,7 +60,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 	public String getName() {
 
 		// Must match the name of the loader in the .opinion files.
-		return "UNIX a.out executable";
+		return "UNIX A.out executable";
 	}
 	
 	@Override
@@ -127,6 +127,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		AddressSpace dataAddrSpace = null;
 		AddressSpace bssAddrSpace = null;
 
+		// Create the .text segment based on its reported starting address and size
 		if (textSize > 0) {
 			Address textAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getTextAddr());
 			try {
@@ -142,6 +143,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			}
 		}
 		
+		// Create the .data segment based on its reported starting address and size		
 		if (dataSize > 0) {
 			Address dataAddr = program.getAddressFactory().getDefaultAddressSpace().getAddress(header.getDataAddr());
 			try {
@@ -169,37 +171,39 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			getRelocationTable(reader, header.getDataRelocOffset(), header.getDataRelocSize());
 
 		Hashtable<String,Long> possibleBssSymbols = new Hashtable<String,Long>();
-		
-		// TODO: collect .text segment functions and disassemble later
 		Vector<Address> localFunctions = new Vector<Address>();
 
-		// look through the symbol table to find any that are local,
-		// and apply the names at the appropriate locations
+		// Process the symbol table by applying labels to identify any symbols whose addresses are given		
 		for (Integer i = 0; i < symTab.size(); i++) {
 			UnixAoutSymbolTableEntry symTabEntry = symTab.elementAt(i);
 			try {
 				if (symTabEntry.value != 0) {
-					// TODO: check that the address space can contain the address before calling createLabel()
 					if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_TEXT) {
-						api.createLabel(textAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
-							namespace, true, SourceType.IMPORTED);
-						localFunctions.add(textAddrSpace.getAddress(symTabEntry.value));
+						if (symTabEntry.isExt) {
+							// Save the entry point to this function in a list. Disassembly should wait until
+							// after we've processed the relocation tables; premature disassembly will follow
+							// references to the wrong locations.
+							Address funcAddr = textAddrSpace.getAddress(symTabEntry.value);
+							localFunctions.add(funcAddr);
+							api.createFunction(funcAddr, symTabEntry.name);							
+						}
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_DATA) {
 						api.createLabel(dataAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
 							namespace, true, SourceType.IMPORTED);
+						
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_BSS) {
 						api.createLabel(bssAddrSpace.getAddress(symTabEntry.value), symTabEntry.name,
 							namespace, true, SourceType.IMPORTED);
+						
 					} else if (symTabEntry.type == UnixAoutSymbolTableEntry.SymbolType.N_UNDF) {
 						// This is a special case given by the A.out spec: if the linker cannot find this
 						// symbol in any of the other binary files, then the fact that it is marked as
 						// N_UNDF but has a non-zero value means that its value should be interpreted as
-						// a size, and the linker should allocate space in .bss for it.
+						// a size, and the linker should reserve space in .bss for it.
 						possibleBssSymbols.put(symTabEntry.name, symTabEntry.value);
 					}
 				}
 			} catch (Exception e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
@@ -210,7 +214,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		// 'possibleBssSymbols' list (which will happen as we walk the relocation
 		// table, below), we won't know whether these symbols exist in another
 		// binary file that was previously loaded, or, instead, if we'll need to
-		// mimic the linker behavior and assign space in .bss for them.
+		// mimic the linker behavior and assign them space in .bss.
 		Long requiredBssSize = (long) 0;
 		for (Long symbolSize : possibleBssSymbols.values()) {
 			requiredBssSize += symbolSize;				
@@ -230,34 +234,32 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			}
 		}
 
-		long bssLocation = processRelocationTable(
-			api, textRelocTab, symTab, textBlock, namespace, bssBlock, possibleBssSymbols, header.getBssAddr(), log);
+		// Keep track of the next available location in .bss
+		long bssLocation = header.getBssAddr();
 		
-		processRelocationTable(
-			api, dataRelocTab, symTab, dataBlock, namespace, bssBlock, possibleBssSymbols, bssLocation, log);		
-	}
-	
-	private long processRelocationTable(FlatProgramAPI api,
-										Vector<UnixAoutRelocationTableEntry> relocTable,
-										Vector<UnixAoutSymbolTableEntry> symTab,
-										MemoryBlock block,
-										Namespace namespace,
-										MemoryBlock bssBlock,
-										Hashtable<String,Long> possibleBssSymbols,
-										long currentBssLocation,
-										MessageLog log) {
-		
-		long newBssLocation = currentBssLocation;
-		for (Integer i = 0; i < relocTable.size(); i++) {
+		///////////////////////////////////////
+		// Process the .text relocation table
+        ///////////////////////////////////////
+		for (Integer i = 0; i < textRelocTab.size(); i++) {
 
-			// TODO: There are other flags/fields in the relocation table entry that need to
-			// be taken into account (e.g. size of the pointer, offset relativity)
-			UnixAoutRelocationTableEntry relocationEntry = relocTable.elementAt(i);
+			UnixAoutRelocationTableEntry relocationEntry = textRelocTab.elementAt(i);
 			UnixAoutSymbolTableEntry symbolEntry = symTab.elementAt((int)relocationEntry.symbolNum);
-			AddressSpace addrSpace = block.getStart().getAddressSpace();
+			AddressSpace addrSpace = textBlock.getStart().getAddressSpace();
 			Address relocAddr = addrSpace.getAddress(relocationEntry.address);
 			
-			if (block.contains(relocAddr)) {
+			// If this symbol's N_EXT flag is clear, then we didn't mark it as a function when
+			// we were processing the symbol table (above). This is because special symbols like
+			// "gcc2_compiled", "___gnu_compiled_c", and names of object files are in the symbol
+			// table for this segment, but do not point to disassemblable code. However, since
+			// there is now a reference from the relocation table, we should be able to
+			// disassemble at its address. Save the address for disassembly later.
+			if (!symbolEntry.isExt) {
+				Address funcAddr = textAddrSpace.getAddress(symbolEntry.value);
+				localFunctions.add(funcAddr);
+				api.createFunction(funcAddr, symbolEntry.name);							
+			}
+			
+			if (textBlock.contains(relocAddr)) {
 				
 				List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
 				List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
@@ -265,22 +267,24 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				
 				if (funcs.size() > 0) {
 					Address funcAddr = funcs.get(0).getEntryPoint();
-					fixAddress(block, relocAddr, funcAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(textBlock, relocAddr, funcAddr, relocationEntry.pcRelativeAddressing);
 
 				} else if (symbolsGlobal.size() > 0) {
 					Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
-					fixAddress(block, relocAddr, globalSymbolAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(textBlock, relocAddr, globalSymbolAddr, relocationEntry.pcRelativeAddressing);
 
 				} else if (symbolsLocal.size() > 0) {
 					Address localSymbolAddr = symbolsLocal.get(0).getAddress();
-					fixAddress(block, relocAddr, localSymbolAddr, relocationEntry.pcRelativeAddressing);
+					fixAddress(textBlock, relocAddr, localSymbolAddr, relocationEntry.pcRelativeAddressing);
+					
 				} else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
 					try {
-						Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(newBssLocation);
+						Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
 						api.createLabel(bssSymbolAddress,
 							symbolEntry.name, namespace, true, SourceType.IMPORTED);
-						fixAddress(block, relocAddr, bssSymbolAddress, relocationEntry.pcRelativeAddressing);
-						newBssLocation += possibleBssSymbols.get(symbolEntry.name);
+						fixAddress(textBlock, relocAddr, bssSymbolAddress, relocationEntry.pcRelativeAddressing);
+						bssLocation += possibleBssSymbols.get(symbolEntry.name);
+						
 					} catch (Exception e) {
 						e.printStackTrace();
 					}
@@ -290,19 +294,70 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 				}
 			}
 		}
-		return newBssLocation;
+		
+		///////////////////////////////////////
+		// Process the .data relocation table
+        ///////////////////////////////////////
+		for (Integer i = 0; i < dataRelocTab.size(); i++) {
+
+			UnixAoutRelocationTableEntry relocationEntry = dataRelocTab.elementAt(i);
+			UnixAoutSymbolTableEntry symbolEntry = symTab.elementAt((int)relocationEntry.symbolNum);
+			AddressSpace addrSpace = dataBlock.getStart().getAddressSpace();
+			Address relocAddr = addrSpace.getAddress(relocationEntry.address);
+						
+			if (dataBlock.contains(relocAddr)) {
+				
+				List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
+				List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
+				List<Symbol> symbolsLocal = api.getSymbols(symbolEntry.name, namespace);
+				
+				if (funcs.size() > 0) {
+					Address funcAddr = funcs.get(0).getEntryPoint();
+					fixAddress(dataBlock, relocAddr, funcAddr, relocationEntry.pcRelativeAddressing);
+
+				} else if (symbolsGlobal.size() > 0) {
+					Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
+					fixAddress(dataBlock, relocAddr, globalSymbolAddr, relocationEntry.pcRelativeAddressing);
+
+				} else if (symbolsLocal.size() > 0) {
+					Address localSymbolAddr = symbolsLocal.get(0).getAddress();
+					fixAddress(dataBlock, relocAddr, localSymbolAddr, relocationEntry.pcRelativeAddressing);
+					
+				} else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
+					try {
+						Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
+						api.createLabel(bssSymbolAddress,
+							symbolEntry.name, namespace, true, SourceType.IMPORTED);
+						fixAddress(dataBlock, relocAddr, bssSymbolAddress, relocationEntry.pcRelativeAddressing);
+						bssLocation += possibleBssSymbols.get(symbolEntry.name);
+						
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+				} else {
+					log.appendMsg("Symbol '" + symbolEntry.name +
+						"' was not found and was not a candidate for allocation in .bss.");
+				}
+			}
+		}
+
+		// Now that all relocation addresses have been rewritten, it's safe to start disassembly
+		// at all the known function entry points.
+		for (Address funcAddr : localFunctions) {
+			api.disassemble(funcAddr);
+		}
 	}
 	
 	/**
 	 * Rewrites the pointer at the specified location to instead point to the
 	 * provided address.
-	 * TODO: Currently, this is not always being called with the right address.
-	 * The caller must check the relocation table entry flags!
+	 * TODO: There are more relocation table flags that need to be taken into
+	 * account by the caller, and more parameters that this function needs to
+	 * accommodate things like pointer size and endianness. 
 	 */
 	private void fixAddress(MemoryBlock block,
 			Address pointerLocation, Address newAddress, boolean isPcRelative) {
 
-		// TODO: take the pointer size and endianness into account.
 		final long value = isPcRelative ?
 				(newAddress.getOffset() - pointerLocation.getOffset()) : newAddress.getOffset();
 		byte[] valueBytes = new byte[] {
