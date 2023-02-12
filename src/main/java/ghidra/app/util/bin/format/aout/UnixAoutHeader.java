@@ -16,6 +16,7 @@ public class UnixAoutHeader {
 	private boolean machineTypeValid;
 	private String languageSpec;
 	private String compilerSpec = "default";
+	private long pageSize;
 
 	private long a_magic;
 	private long a_text;
@@ -50,7 +51,6 @@ public class UnixAoutHeader {
 	// There are probably only specific exeType/OS/arch combinations for which
 	// accurate values are important.
 	private static final int SEGMENT_SIZE = 1024;
-	private static final int PAGE_SIZE = 4096;
 
 	/**
 	 * Interprets binary data as an exec header from a UNIX-style a.out executable,
@@ -96,7 +96,7 @@ public class UnixAoutHeader {
 		symOffset = datRelOffset + a_drsize;
 		strOffset = symOffset + a_syms;
 
-		txtAddr = (exeType == ExecutableType.QMAGIC) ? PAGE_SIZE : 0;
+		txtAddr = (exeType == ExecutableType.QMAGIC) ? pageSize : 0;
 		txtEndAddr = txtAddr + a_text;
 		datAddr = (exeType == ExecutableType.OMAGIC) ? txtEndAddr : segmentRound(txtEndAddr);
 		bssAddr = datAddr + a_data;
@@ -205,6 +205,7 @@ public class UnixAoutHeader {
 	private void checkMachineTypeValidity() {
 
 		machineTypeValid = true;
+		pageSize = 4096; // TODO: find the best default for this
 		final short machtype = (short) ((a_magic >> 16) & 0xFF);
 
 		// TODO: Does Ghidra have language support that corresponds
@@ -223,7 +224,8 @@ public class UnixAoutHeader {
 			languageSpec = "68000:BE:32:MC68020";
 			break;
 		case UnixAoutMachineType.M_SPARC:
-			languageSpec = "Sparc:BE:32:default";
+			languageSpec = "sparc:BE:32:default";
+			pageSize = 8192;
 			break;
 		case UnixAoutMachineType.M_R3000:
 			languageSpec = "MIPS:LE:32:default";
