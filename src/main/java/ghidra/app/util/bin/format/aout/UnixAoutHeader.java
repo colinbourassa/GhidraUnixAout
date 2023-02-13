@@ -44,7 +44,6 @@ public class UnixAoutHeader {
 	// 32- and 64-bit integers being padded out in the struct. The intended
 	// size seems to be eight 32-bit words (32 bytes total.)
 	private static final int sizeOfExecHeader = 32;
-	private static final int _N_HDROFF = (1024 - sizeOfExecHeader);
 
 	// TODO: These values are not required to compute load addresses for all
 	// executable types, and they can be different depending on the OS/arch.
@@ -64,49 +63,38 @@ public class UnixAoutHeader {
 	public UnixAoutHeader(ByteProvider provider, boolean isLittleEndian) throws IOException {
 		BinaryReader reader = new BinaryReader(provider, isLittleEndian);
 
-		// TODO: this first word might contain some additional flags (in the
-		// high byte) that we're not yet checking. The BSD implementation of
-		// the format mentions EX_DYNAMIC and EX_PIC, while the SunOS version
-		// apparently has a toolset version number indicator. The former may
-		// be important, while the latter is probably not.
-		a_magic = reader.readNextUnsignedInt();
-		a_text = reader.readNextUnsignedInt();
-		a_data = reader.readNextUnsignedInt();
-		a_bss = reader.readNextUnsignedInt();
-		a_syms = reader.readNextUnsignedInt();
-		a_entry = reader.readNextUnsignedInt();
-		a_trsize = reader.readNextUnsignedInt();
-		a_drsize = reader.readNextUnsignedInt();
-		binarySize = reader.length();
+		this.a_magic = reader.readNextUnsignedInt();
+		this.a_text = reader.readNextUnsignedInt();
+		this.a_data = reader.readNextUnsignedInt();
+		this.a_bss = reader.readNextUnsignedInt();
+		this.a_syms = reader.readNextUnsignedInt();
+		this.a_entry = reader.readNextUnsignedInt();
+		this.a_trsize = reader.readNextUnsignedInt();
+		this.a_drsize = reader.readNextUnsignedInt();
+		this.binarySize = reader.length();
 
 		checkExecutableType();
-		checkMachineTypeValidity();
+		checkMachineTypeValidity(isLittleEndian);
+		determineTextOffset();
 
-		if (exeType == ExecutableType.ZMAGIC) {
-			txtOffset = _N_HDROFF + sizeOfExecHeader;
-		} else if (exeType == ExecutableType.QMAGIC) {
-			txtOffset = 0;
-		} else {
-			txtOffset = sizeOfExecHeader;
-		}
+		this.datOffset = this.txtOffset + this.a_text;
+		this.txtRelOffset = this.datOffset + this.a_data;
+		this.datRelOffset = this.txtRelOffset + this.a_trsize;
+		this.symOffset = this.datRelOffset + this.a_drsize;
+		this.strOffset = this.symOffset + this.a_syms;
 
-		datOffset = txtOffset + a_text;
-		txtRelOffset = datOffset + a_data;
-		datRelOffset = txtRelOffset + a_trsize;
-		symOffset = datRelOffset + a_drsize;
-		strOffset = symOffset + a_syms;
-
-		txtAddr = (exeType == ExecutableType.QMAGIC) ? pageSize : 0;
-		txtEndAddr = txtAddr + a_text;
-		datAddr = (exeType == ExecutableType.OMAGIC) ? txtEndAddr : segmentRound(txtEndAddr);
-		bssAddr = datAddr + a_data;
+		this.txtAddr = (this.exeType == ExecutableType.QMAGIC) ? this.pageSize : 0;
+		this.txtEndAddr = this.txtAddr + this.a_text;
+		this.datAddr = (this.exeType == ExecutableType.OMAGIC) ?
+				this.txtEndAddr : segmentRound(this.txtEndAddr);
+		this.bssAddr = this.datAddr + this.a_data;
 	}
 
 	/**
 	 * Returns the processor/language specified by this header.
 	 */
 	public String getLanguageSpec() {
-		return languageSpec;
+		return this.languageSpec;
 	}
 
 	/**
@@ -114,14 +102,14 @@ public class UnixAoutHeader {
 	 * all machine types other than i386, where it is assumed to be gcc.
 	 */
 	public String getCompilerSpec() {
-		return compilerSpec;
+		return this.compilerSpec;
 	}
 	
 	/**
 	 * Returns the enumerated type of executable contained in this A.out file.
 	 */
 	public ExecutableType getExecutableType() {
-		return exeType;
+		return this.exeType;
 	}
 
 	/**
@@ -130,118 +118,240 @@ public class UnixAoutHeader {
 	 */
 	public boolean isValid() {
 		return isMachineTypeValid() &&
-			   (exeType != ExecutableType.UNKNOWN) &&
+			   (this.exeType != ExecutableType.UNKNOWN) &&
 			   areOffsetsValid();
 	}
 
 	public long getTextSize() {
-		return a_text;
+		return this.a_text;
 	}
 
 	public long getDataSize() {
-		return a_data;
+		return this.a_data;
 	}
 
 	public long getBssSize() {
-		return a_bss;
+		return this.a_bss;
 	}
 
 	public long getSymSize() {
-		return a_syms;
+		return this.a_syms;
 	}
 
 	public long getEntryPoint() {
-		return a_entry;
+		return this.a_entry;
 	}
 
 	public long getTextRelocSize() {
-		return a_trsize;
+		return this.a_trsize;
 	}
 
 	public long getDataRelocSize() {
-		return a_drsize;
+		return this.a_drsize;
 	}
 
 	public long getTextOffset() {
-		return txtOffset;
+		return this.txtOffset;
 	}
 
 	public long getDataOffset() {
-		return datOffset;
+		return this.datOffset;
 	}
 
 	public long getTextRelocOffset() {
-		return txtRelOffset;
+		return this.txtRelOffset;
 	}
 
 	public long getDataRelocOffset() {
-		return datRelOffset;
+		return this.datRelOffset;
 	}
 
 	public long getSymOffset() {
-		return symOffset;
+		return this.symOffset;
 	}
 
 	public long getStrOffset() {
-		return strOffset;
+		return this.strOffset;
 	}
 
 	public long getTextAddr() {
-		return txtAddr;
+		return this.txtAddr;
 	}
 
 	public long getDataAddr() {
-		return datAddr;
+		return this.datAddr;
 	}
 
 	public long getBssAddr() {
-		return bssAddr;
+		return this.bssAddr;
 	}
 
 	/**
 	 * Checks the magic word in the header for a known machine type ID, and sets the
 	 * languageSpec string accordingly.
 	 */
-	private void checkMachineTypeValidity() {
+	private void checkMachineTypeValidity(boolean readingAsLittleEndian) {
 
-		machineTypeValid = true;
-		pageSize = 4096; // TODO: find the best default for this
-		final short machtype = (short) ((a_magic >> 16) & 0xFF);
-
-		// TODO: Does Ghidra have language support that corresponds
-		// to the OLDSUN2, MIPS1, and MIPS2 machine types?
-		// (For reference, the Linux a.out.h describes MIPS1 as
-		// R3000/R3000 and MIPS2 as R6000/R4000.)
+		this.machineTypeValid = true;
+		this.pageSize = 4096;
+		final short machtype = (short) ((this.a_magic >> 16) & 0xFF);
+		final String readEndianness = readingAsLittleEndian ? "LE" : "BE";
 
 		switch (machtype) {
-		case UnixAoutMachineType.M_OLDSUN2:
-			languageSpec = "UNKNOWN:BE:32:default";
-			break;
+		/**
+		 * Motorola 68K family
+		 */
+		case UnixAoutMachineType.M_M68K2K:
+			this.pageSize = 2048;
 		case UnixAoutMachineType.M_68010:
-			languageSpec = "68000:BE:32:default";
+		case UnixAoutMachineType.M_HP200:
+			this.languageSpec = "68000:BE:32:MC68010";
 			break;
 		case UnixAoutMachineType.M_68020:
-			languageSpec = "68000:BE:32:MC68020";
+		case UnixAoutMachineType.M_HP300:
+			this.languageSpec = "68000:BE:32:MC68020";
 			break;
-		case UnixAoutMachineType.M_SPARC:
-			languageSpec = "sparc:BE:32:default";
+		case UnixAoutMachineType.M_M68K_NETBSD:
 			pageSize = 8192;
+		case UnixAoutMachineType.M_M68K4K_NETBSD:
+			this.languageSpec = "68000:BE:32:default";
 			break;
-		case UnixAoutMachineType.M_R3000:
-			languageSpec = "MIPS:LE:32:default";
+		
+		/**
+		 * SPARC family
+		 */
+		case UnixAoutMachineType.M_SPARC_NETBSD:
+		case UnixAoutMachineType.M_SPARC:
+		case UnixAoutMachineType.M_SPARCLET:
+			this.pageSize = 8192;
+			this.languageSpec = "sparc:BE:32:default";
 			break;
-		case UnixAoutMachineType.M_386:
-			languageSpec = "x86:LE:32:default";
-			compilerSpec = "gcc";
+		case UnixAoutMachineType.M_SPARC64_NETBSD:
+			this.languageSpec = "sparc:BE:64:default";
 			break;
+			
+		/**
+		 * MIPS family
+		 */
+		case UnixAoutMachineType.M_PMAX_NETBSD:
 		case UnixAoutMachineType.M_MIPS1:
-			languageSpec = "UNKNOWN:BE:32:default";
-			break;
 		case UnixAoutMachineType.M_MIPS2:
-			languageSpec = "UNKNOWN:BE:32:default";
+		case UnixAoutMachineType.M_R3000:
+			this.languageSpec = "MIPS:LE:32:default";
+			break;
+		case UnixAoutMachineType.M_MIPS:
+			this.languageSpec = "MIPS:BE:32:default";
+			break;
+			
+		/**
+		 * National Semiconductor NS32000 family
+		 */
+		case UnixAoutMachineType.M_532_NETBSD:
+		case UnixAoutMachineType.M_NS32032:
+		case UnixAoutMachineType.M_NS32532:
+			this.languageSpec = "UNKNOWN:LE:32:default";
+			break;
+			
+		/**
+		 * x86 family
+		 */
+		case UnixAoutMachineType.M_386_NETBSD:
+		case UnixAoutMachineType.M_386:
+		case UnixAoutMachineType.M_386_DYNIX:
+			this.languageSpec = "x86:LE:32:default";
+			break;
+		case UnixAoutMachineType.M_X86_64_NETBSD:
+			this.languageSpec = "x86:LE:64:default";
+			break;
+			
+		/**
+		 * ARM family
+		 */
+		case UnixAoutMachineType.M_ARM6_NETBSD:
+		case UnixAoutMachineType.M_ARM:
+			this.languageSpec = "ARM:" + readEndianness + "32:default";
+			break;
+		case UnixAoutMachineType.M_AARCH64:
+			this.languageSpec = "AARCH64:" + readEndianness + "64:default";
+			break;
+			
+		/**
+		 * RISC family
+		 */
+		case UnixAoutMachineType.M_OR1K:
+			this.languageSpec = "UNKNOWN:BE:32:default";
+			break;
+		case UnixAoutMachineType.M_RISCV:
+			this.languageSpec = "RISCV:LE:32:default";
+			break;
+		case UnixAoutMachineType.M_HPPA_OPENBSD:
+		case UnixAoutMachineType.M_HPUX800:
+			this.languageSpec = "pa-risc:BE:32:default";
+			break;
+
+		/**
+		 * PowerPC family
+		 */
+		case UnixAoutMachineType.M_POWERPC_NETBSD:
+			this.languageSpec = "PowerPC:" + readEndianness + "32:default";
+			break;
+		case UnixAoutMachineType.M_POWERPC64:
+			this.languageSpec = "PowerPC:" + readEndianness + "64:default";
+			break;
+
+		/**
+		 * SuperH family
+		 * Note: It's unclear if there is support for SuperH SH-3 or SH-5 cores;
+		 * the primary SuperH language seems to support SH-1 and SH-2 variants
+		 * and the alternative is the SuperH4 language.
+		 */
+		case UnixAoutMachineType.M_SH3:
+		case UnixAoutMachineType.M_SH5_32:
+			this.languageSpec = "SuperH:BE:32:default";
+			break;
+		case UnixAoutMachineType.M_SH5_64:
+			this.languageSpec = "SuperH:BE:64:default";
+			break;
+			
+		/**
+		 * VAX family
+		 */
+		case UnixAoutMachineType.M_VAX_NETBSD:
+			this.pageSize = 512;
+		case UnixAoutMachineType.M_VAX4K_NETBSD:
+			this.languageSpec = "UNKNOWN:LE:32:default";
+			break;
+
+		/**
+		 * Other
+		 */
+		case UnixAoutMachineType.M_OLDSUN2:
+			this.languageSpec = "UNKNOWN:BE:32:default";
+			break;
+		case UnixAoutMachineType.M_CRIS:
+			this.languageSpec = "UNKNOWN:LE:32:default";
+			break;
+		case UnixAoutMachineType.M_ALPHA_NETBSD:
+		case UnixAoutMachineType.M_IA64:
+			this.languageSpec = "UNKNOWN:" + readEndianness + "64:default";
+			break;
+		case UnixAoutMachineType.M_29K:
+		case UnixAoutMachineType.M_88K_OPENBSD:
+			this.languageSpec = "UNKNOWN:" + readEndianness + "32:default";
 			break;
 		default:
-			machineTypeValid = false;
+			this.machineTypeValid = false;
+		}
+		
+		// Check that the detected architecture's endianness matches the endianness
+		// with which we're reading the file; if there's a mismatch, clear the
+		// machineTypeValid flag because this was evidently a false reading.
+		if (this.machineTypeValid) {
+			String[] languageTokens = this.languageSpec.split(":");
+			if ((languageTokens.length < 2) ||
+				!languageTokens[1].equalsIgnoreCase(readEndianness)) {
+				this.machineTypeValid = false;
+			}
 		}
 	}
 
@@ -250,7 +360,7 @@ public class UnixAoutHeader {
 	 * ID.
 	 */
 	private boolean isMachineTypeValid() {
-		return machineTypeValid;
+		return this.machineTypeValid;
 	}
 
 	/**
@@ -258,27 +368,38 @@ public class UnixAoutHeader {
 	 * valid executable type.
 	 */
 	private void checkExecutableType() {
-		final short exetypeMagic = (short) (a_magic & 0xFFFF);
+		final short exetypeMagic = (short) (this.a_magic & 0xFFFF);
 
 		switch (exetypeMagic) {
 		case 0x111: // 0421: core file
-			exeType = ExecutableType.CMAGIC;
+			this.exeType = ExecutableType.CMAGIC;
 			break;
 		case 0x108: // 0410: pure executable
-			exeType = ExecutableType.NMAGIC;
+			this.exeType = ExecutableType.NMAGIC;
 			break;
 		case 0x107: // 0407: object file or impure executable
-			exeType = ExecutableType.OMAGIC;
+			this.exeType = ExecutableType.OMAGIC;
 			break;
 		case 0x0CC: // 0314: demand-paged exe w/ header in .text
-			exeType = ExecutableType.QMAGIC;
+			this.exeType = ExecutableType.QMAGIC;
 			break;
 		case 0x10B: // 0413: demand-paged executable
-			exeType = ExecutableType.ZMAGIC;
+			this.exeType = ExecutableType.ZMAGIC;
 			break;
 		default:
-			exeType = ExecutableType.UNKNOWN;
+			this.exeType = ExecutableType.UNKNOWN;
 		}
+	}
+	
+	/**
+	 * Determines the offset in the binary file at which the .text segment begins.
+	 */
+	private void determineTextOffset() {
+		if (this.exeType == ExecutableType.QMAGIC) {
+			this.txtOffset = 0;
+		} else {
+			this.txtOffset = sizeOfExecHeader;
+		}		
 	}
 
 	/**
@@ -286,17 +407,17 @@ public class UnixAoutHeader {
 	 * within the size of the file.
 	 */
 	private boolean areOffsetsValid() {
-		boolean status = (txtOffset < binarySize) &&
-				         (datOffset < binarySize) &&
-				         (txtRelOffset < binarySize) &&
-				         (datRelOffset < binarySize) &&
-				         (symOffset < binarySize) &&
-				         (strOffset < binarySize);
+		boolean status = (this.txtOffset < this.binarySize) &&
+				         (this.datOffset < this.binarySize) &&
+				         (this.txtRelOffset < this.binarySize) &&
+				         (this.datRelOffset < this.binarySize) &&
+				         (this.symOffset < this.binarySize) &&
+				         (this.strOffset < this.binarySize);
 		return status;
 	}
 
 	private long segmentRound(long addr) {
-		final long mask = SEGMENT_SIZE - 1;
+		final long mask = UnixAoutHeader.SEGMENT_SIZE - 1;
 		long rounded = ((addr + mask) & ~mask);
 		return rounded;
 	}
