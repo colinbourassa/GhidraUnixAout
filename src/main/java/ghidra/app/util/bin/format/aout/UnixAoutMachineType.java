@@ -45,6 +45,10 @@ public class UnixAoutMachineType {
 	public final static short M_X86_64_NETBSD  = 0x9d; // NetBSD/amd64
 	public final static short M_SH5_32         = 0x9e; // SuperH 32-bit (ILP 32)
 	public final static short M_IA64           = 0x9f; // Itanium
+	public final static short M_AARCH64        = 0xb7; // ARM AARCH64
+	public final static short M_OR1K           = 0xb8; // OpenRISC 1000
+	public final static short M_RISCV          = 0xb9; // RISC-V
+	
 	public final static short M_HP200          = 0xc8; // HP200 (68010) BSD
 	public final static short M_HP300          = (0x12c % 0x100); // HP300 (68020+68881) BSD
 	public final static short M_HPUX800        = (0x20b % 0x100); // HP800
