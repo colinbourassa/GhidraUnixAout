@@ -45,10 +45,8 @@ public class UnixAoutHeader {
 	// size seems to be eight 32-bit words (32 bytes total.)
 	private static final int sizeOfExecHeader = 32;
 
-	// TODO: These values are not required to compute load addresses for all
-	// executable types, and they can be different depending on the OS/arch.
-	// There are probably only specific exeType/OS/arch combinations for which
-	// accurate values are important.
+	// TODO: The segment size will likely vary with OS/arch, and should be
+  // updated accordingly.
 	private static final int SEGMENT_SIZE = 1024;
 
 	/**
@@ -73,9 +71,18 @@ public class UnixAoutHeader {
 		this.a_drsize = reader.readNextUnsignedInt();
 		this.binarySize = reader.length();
 
+    // TODO: In NetBSD/i386 examples of a.out, the 32-bit a_magic/midmag word seems to
+    // always be written in big-endian regardless of the data endianness in the rest of
+    // the file. Are there other examples of this?
+    /*
+    if (isLittleEndian) {
+      this.a_magic = new Integer(this.a_magic).reverseBytes();
+    }
+    */
+
 		checkExecutableType();
 		checkMachineTypeValidity(isLittleEndian);
-		determineTextOffset();
+		determineTextOffset(isLittleEndian);
 
 		this.datOffset = this.txtOffset + this.a_text;
 		this.txtRelOffset = this.datOffset + this.a_data;
@@ -393,9 +400,20 @@ public class UnixAoutHeader {
 	
 	/**
 	 * Determines the offset in the binary file at which the .text segment begins.
+   * This routine should attempt to replicate the logic from the N_TXTOFF macro
+   * that appears in the different incarnations of a.out.h.
+   *
+   * TODO: The FreeBSD imgact_aout.h implies that, if the a_magic word contains
+   * ZMAGIC when read as little endian, the file offset for .text is __LDPGSZ;
+   * otherwise, if a_magic contains ZMAGIC when read as big endian, the file offset
+   * for .text is 0. Indeed, it looks like NetBSD uses big-endian ordering for
+   * the a_magic word even when the file contains code for a little-endian
+   * processor. This seems strange.
 	 */
-	private void determineTextOffset() {
-		if (this.exeType == ExecutableType.QMAGIC) {
+	private void determineTextOffset(boolean isLittleEndian) {
+
+		if ((this.exeType == ExecutableType.QMAGIC) ||
+        (!isLittleEndian && (this.exeType == ExecutableType.ZMAGIC))) {
 			this.txtOffset = 0;
 		} else {
 			this.txtOffset = sizeOfExecHeader;
