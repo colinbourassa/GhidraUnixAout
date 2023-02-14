@@ -110,10 +110,6 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		// (There may be other magic types that make sense to load as overlays as well.)
 		final boolean isOverlay = (header.getExecutableType() == ExecutableType.OMAGIC);
 		
-		// TODO: loading an A.out into an existing program as an overlay seems to create it
-		// in the 'OverlayAddressSpace'. Do we need to more explicitly create (or rename) the
-		// address space so that any subsequent A.out files can have their content differentiated?
-
 		Namespace namespace = null;
 		try {
 			namespace = api.createNamespace(program.getGlobalNamespace(), filename);
@@ -238,7 +234,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		
 		///////////////////////////////////////
 		// Process the .text relocation table
-        ///////////////////////////////////////
+                ///////////////////////////////////////
 		for (Integer i = 0; i < textRelocTab.size(); i++) {
 
 			UnixAoutRelocationTableEntry relocationEntry = textRelocTab.elementAt(i);
@@ -302,7 +298,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		
 		///////////////////////////////////////
 		// Process the .data relocation table
-        ///////////////////////////////////////
+		///////////////////////////////////////
 		for (Integer i = 0; i < dataRelocTab.size(); i++) {
 
 			UnixAoutRelocationTableEntry relocationEntry = dataRelocTab.elementAt(i);
@@ -357,6 +353,11 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		for (Address funcAddr : localFunctions.keySet()) {
 			api.disassemble(funcAddr);
 			api.createFunction(funcAddr, localFunctions.get(funcAddr));
+		}
+		
+		if ((header.getExecutableType() != UnixAoutHeader.ExecutableType.OMAGIC) &&
+		    (header.getExecutableType() != UnixAoutHeader.ExecutableType.CMAGIC)) {
+		    api.disassemble(textAddrSpace.getAddress(header.getEntryPoint()));
 		}
 	}
 	
