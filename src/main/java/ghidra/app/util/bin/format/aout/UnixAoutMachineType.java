@@ -5,11 +5,15 @@ public class UnixAoutMachineType {
 	// These values come from a combination of sources, including NetBSD's aout_mids.h
 	// and the GNU BFD Library's libaout.h.
 	//
-	// Note that a few of the HP values exceed a full eight-bit count.
-	// The GNU Binary File Descriptor (bfd) library seems to take the 8-bit modulus of
-	// these values rather than let them interfere with the flags in the high byte of a_info. 
-	// See: https://sourceware.org/git/?p=binutils-gdb.git;a=blob_plain;f=bfd/libaout.h;hb=HEAD
-	
+	// Note: some a.out header files list a few HP values (for the 300 Series, 800 Series, etc.)
+	// and these values exceed a full eight-bit count. Occasionally, this is accounted for by
+	// extending the Machine ID field of the a_magic word two bits higher, leaving only six bits
+	// in the MSB for other flags. This may not be correct, because those high-value HP machine
+	// IDs probably only appear in HP UX binaries, which use a different format. (This format is
+	// still named "a.out", but has a completely different header and internal organization.)
+	// The 10-bit Machine ID field would also interfere with flags used by VxWorks, NetBSD, and
+	// probably others.
+		
 	public final static short M_OLDSUN2        = 0x00;
 	public final static short M_68010          = 0x01;
 	public final static short M_68020          = 0x02;
@@ -48,10 +52,12 @@ public class UnixAoutMachineType {
 	public final static short M_AARCH64        = 0xb7; // ARM AARCH64
 	public final static short M_OR1K           = 0xb8; // OpenRISC 1000
 	public final static short M_RISCV          = 0xb9; // RISC-V
-	
-	public final static short M_HP200          = 0xc8; // HP200 (68010) BSD
-	public final static short M_HP300          = (0x12c % 0x100); // HP300 (68020+68881) BSD
-	public final static short M_HPUX800        = (0x20b % 0x100); // HP800
-	public final static short M_HPUX           = (0x20C % 0x100); // HP200/300 HPUX (8-bit value: 12)
 	public final static short M_CRIS           = 0xff; // Axis ETRAX CRIS
+	
+	/**
+	 * Machine IDs that should only appear in the incompatible HP UX a.out format:
+	 *   HP300 (68020+68881): 0x12c
+	 *   HP200/300          : 0x20c
+	 *   HP800              : 0x20b
+	 */
 }
