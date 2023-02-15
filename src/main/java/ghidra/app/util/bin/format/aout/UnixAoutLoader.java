@@ -77,16 +77,18 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		// It is likely that only one of these will produce sensible values.
 		UnixAoutHeader hdrBE = new UnixAoutHeader(provider, false);
 		UnixAoutHeader hdrLE = new UnixAoutHeader(provider, true);
+		boolean beValid = false;
 		
 		if (hdrBE.isValid()) {
 			final String lang = hdrBE.getLanguageSpec();
 			final String comp = hdrBE.getCompilerSpec();
 			loadSpecs.add(new LoadSpec(this, 0, new LanguageCompilerSpecPair(lang, comp), true));
+			beValid = true;
 		}
 		if (hdrLE.isValid()) {
 			final String lang = hdrLE.getLanguageSpec();
 			final String comp = hdrLE.getCompilerSpec();
-			loadSpecs.add(new LoadSpec(this, 0, new LanguageCompilerSpecPair(lang, comp), false));			
+			loadSpecs.add(new LoadSpec(this, 0, new LanguageCompilerSpecPair(lang, comp), !beValid));			
 		}
 		
 		return loadSpecs;
@@ -234,7 +236,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		
 		///////////////////////////////////////
 		// Process the .text relocation table
-                ///////////////////////////////////////
+        ///////////////////////////////////////
 		for (Integer i = 0; i < textRelocTab.size(); i++) {
 
 			UnixAoutRelocationTableEntry relocationEntry = textRelocTab.elementAt(i);
@@ -298,7 +300,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		
 		///////////////////////////////////////
 		// Process the .data relocation table
-		///////////////////////////////////////
+        ///////////////////////////////////////
 		for (Integer i = 0; i < dataRelocTab.size(); i++) {
 
 			UnixAoutRelocationTableEntry relocationEntry = dataRelocTab.elementAt(i);
