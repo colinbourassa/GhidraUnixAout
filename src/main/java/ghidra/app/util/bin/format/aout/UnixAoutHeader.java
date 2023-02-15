@@ -17,7 +17,7 @@ public class UnixAoutHeader {
     private String languageSpec;
     private String compilerSpec = "default";
     private long pageSize;
-    
+
     private boolean isOldSun2 = false;
     private boolean isNetBSD = false;
     private boolean isSparc = false;
@@ -71,13 +71,13 @@ public class UnixAoutHeader {
         this.a_drsize = reader.readNextUnsignedInt();
         this.binarySize = reader.length();
 
-        // TODO: In NetBSD/i386 examples of a.out, the 32-bit a_magic/midmag word seems to
+        // NOTE: In NetBSD/i386 examples of a.out, the 32-bit a_magic/midmag word seems to
         // always be written in big-endian regardless of the data endianness in the rest of
         // the file. Are there other examples of this?
         if (isLittleEndian) {
             this.a_magic = Integer.reverseBytes((int)this.a_magic); 
         }
-        
+
         checkExecutableType();
         checkMachineTypeValidity(isLittleEndian);
         determineTextOffset(isLittleEndian);
@@ -203,9 +203,9 @@ public class UnixAoutHeader {
         final String readEndianness = readingAsLittleEndian ? "LE" : "BE";
 
         switch (machtype) {
-        /**
-         * Motorola 68K family
-         */
+            /**
+             * Motorola 68K family
+             */
         case UnixAoutMachineType.M_68010:
             this.languageSpec = "68000:BE:32:MC68010";
             break;
@@ -222,9 +222,9 @@ public class UnixAoutHeader {
             this.languageSpec = "68000:BE:32:default";
             break;
 
-        /**
-         * SPARC family
-         */
+            /**
+             * SPARC family
+             */
         case UnixAoutMachineType.M_SPARC_NETBSD:
             this.isNetBSD = true;
         case UnixAoutMachineType.M_SPARC:
@@ -239,9 +239,9 @@ public class UnixAoutHeader {
             this.languageSpec = "sparc:BE:64:default";
             break;
 
-        /**
-         * MIPS family
-         */
+            /**
+             * MIPS family
+             */
         case UnixAoutMachineType.M_PMAX_NETBSD:
             this.isNetBSD = true;
         case UnixAoutMachineType.M_MIPS1:
@@ -253,9 +253,9 @@ public class UnixAoutHeader {
             this.languageSpec = "MIPS:BE:32:default";
             break;
 
-        /**
-         * National Semiconductor NS32000 family
-         */
+            /**
+             * National Semiconductor NS32000 family
+             */
         case UnixAoutMachineType.M_532_NETBSD:
             this.isNetBSD = true;
         case UnixAoutMachineType.M_NS32032:
@@ -263,9 +263,9 @@ public class UnixAoutHeader {
             this.languageSpec = "UNKNOWN:LE:32:default";
             break;
 
-        /**
-         * x86 family
-         */
+            /**
+             * x86 family
+             */
         case UnixAoutMachineType.M_386_NETBSD:
             this.isNetBSD = true;
         case UnixAoutMachineType.M_386:
@@ -278,9 +278,9 @@ public class UnixAoutHeader {
             this.languageSpec = "x86:LE:64:default";
             break;
 
-        /**
-         * ARM family
-         */
+            /**
+             * ARM family
+             */
         case UnixAoutMachineType.M_ARM6_NETBSD:
             this.isNetBSD = true;
         case UnixAoutMachineType.M_ARM:
@@ -290,9 +290,9 @@ public class UnixAoutHeader {
             this.languageSpec = "AARCH64:" + readEndianness + "64:default";
             break;
 
-        /**
-         * RISC family
-         */
+            /**
+             * RISC family
+             */
         case UnixAoutMachineType.M_OR1K:
             this.languageSpec = "UNKNOWN:BE:32:default";
             break;
@@ -303,9 +303,9 @@ public class UnixAoutHeader {
             this.languageSpec = "pa-risc:BE:32:default";
             break;
 
-        /**
-         * PowerPC family
-         */
+            /**
+             * PowerPC family
+             */
         case UnixAoutMachineType.M_POWERPC_NETBSD:
             this.isNetBSD = true;
             this.languageSpec = "PowerPC:" + readEndianness + "32:default";
@@ -314,12 +314,12 @@ public class UnixAoutHeader {
             this.languageSpec = "PowerPC:" + readEndianness + "64:default";
             break;
 
-        /**
-         * SuperH family
-         * Note: It's unclear if there is support for SuperH SH-3 or SH-5 cores;
-         * the primary SuperH language seems to support SH-1 and SH-2 variants
-         * and the alternative is the SuperH4 language.
-         */
+            /**
+             * SuperH family
+             * Note: It's unclear if there is support for SuperH SH-3 or SH-5 cores;
+             * the primary SuperH language seems to support SH-1 and SH-2 variants
+             * and the alternative is the SuperH4 language.
+             */
         case UnixAoutMachineType.M_SH3:
         case UnixAoutMachineType.M_SH5_32:
             this.languageSpec = "SuperH:BE:32:default";
@@ -328,9 +328,9 @@ public class UnixAoutHeader {
             this.languageSpec = "SuperH:BE:64:default";
             break;
 
-        /**
-         * VAX family
-         */
+            /**
+             * VAX family
+             */
         case UnixAoutMachineType.M_VAX_NETBSD:
             this.pageSize = 512;
         case UnixAoutMachineType.M_VAX4K_NETBSD:
@@ -338,9 +338,9 @@ public class UnixAoutHeader {
             this.languageSpec = "UNKNOWN:LE:32:default";
             break;
 
-        /**
-         * Other
-         */
+            /**
+             * Other
+             */
         case UnixAoutMachineType.M_CRIS:
             this.languageSpec = "UNKNOWN:LE:32:default";
             break;
@@ -426,31 +426,31 @@ public class UnixAoutHeader {
         // header in the .text section. This includes QMAGIC type and some (most? all?)
         // big-endian ZMAGICs.
         else if ((this.exeType == ExecutableType.QMAGIC) ||
-                 (this.exeType == ExecutableType.ZMAGIC)) {
+                (this.exeType == ExecutableType.ZMAGIC)) {
             this.txtOffset = 0;
-            
+
         } else {
             this.txtOffset = sizeOfExecHeader;
         }		
     }
-    
+
     /**
      * Uses the combination of executable type and architecture to set the appropriate
      * base address of the .text segment when loaded.
      */
     private void determineTextAddr() {
-        
+
         if (this.isOldSun2) {
             // Special case defined by SunOS 4.1.3, sys/sparc/a.out.h.
             // This is the SunOS 2 *segment size*, which we don't keep track of
             // separately from the page size.
             this.txtAddr = 0x8000;
-            
+
         } else if ( (this.isSparc && (this.exeType == ExecutableType.NMAGIC)) ||
-                    (this.isNetBSD) ||
-                    (this.exeType == ExecutableType.QMAGIC)) {
+                (this.isNetBSD) ||
+                (this.exeType == ExecutableType.QMAGIC)) {
             this.txtAddr = this.pageSize;
-            
+
         } else {
             this.txtAddr = 0;
         }
@@ -466,14 +466,17 @@ public class UnixAoutHeader {
         // the file. The string table is also not given an explicit size in
         // the header. 
         boolean status =
-            ((this.a_text == 0)   || (this.txtOffset    < this.binarySize)  &&
-            ((this.a_data == 0)   || (this.datOffset    < this.binarySize)) &&
-            ((this.a_trsize == 0) || (this.txtRelOffset < this.binarySize)) &&
-            ((this.a_drsize == 0) || (this.datRelOffset < this.binarySize)) &&
-            ((this.a_syms == 0)   || (this.symOffset    < this.binarySize)));
+                ((this.a_text == 0)   || (this.txtOffset    < this.binarySize)  &&
+                ((this.a_data == 0)   || (this.datOffset    < this.binarySize)) &&
+                ((this.a_trsize == 0) || (this.txtRelOffset < this.binarySize)) &&
+                ((this.a_drsize == 0) || (this.datRelOffset < this.binarySize)) &&
+                ((this.a_syms == 0)   || (this.symOffset    < this.binarySize)));
         return status;
     }
 
+    /**
+     * Rounds the provided address up to the next page boundary.
+     */
     private long segmentRound(long addr) {
         final long mask = this.pageSize - 1;
         long rounded = ((addr + mask) & ~mask);

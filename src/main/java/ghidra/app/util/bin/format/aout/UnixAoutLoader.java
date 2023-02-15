@@ -26,7 +26,6 @@ import ghidra.app.util.bin.format.aout.UnixAoutHeader.ExecutableType;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.app.util.opinion.AbstractProgramWrapperLoader;
 import ghidra.app.util.opinion.LoadSpec;
-import ghidra.framework.model.DomainObject;
 import ghidra.framework.store.LockException;
 import ghidra.program.flatapi.FlatProgramAPI;
 import ghidra.program.model.address.Address;
@@ -48,19 +47,20 @@ import ghidra.util.exception.InvalidInputException;
 import ghidra.util.task.TaskMonitor;
 
 /**
- * Loads the old UNIX A.out executable format. This style was also used by
- * UNIX-like systems such as SunOS, BSD, and VxWorks, as well as some early
- * distributions of Linux.
- * 
- * Although there do exist implementations of A.out with 64-bit and GNU
- * extensions, this loader does not currently support them. 
+ * A {@link Loader} for processing UNIX-style A.out executables
+ *
+ * This style was also used by UNIX-like systems such as SunOS, BSD, and
+ * VxWorks, as well as some early distributions of Linux. Although there
+ * do exist implementations of A.out with 64-bit and GNU extensions, this
+ * loader does not currently support them.
+ *
+ * @see <a href="https://wiki.osdev.org/A.out">OSDev.org A.out</a>
+ * @see <a href="https://man.freebsd.org/cgi/man.cgi?a.out(5)">FreeBSD manpage</a>
  */
 public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 
 	@Override
 	public String getName() {
-
-		// Must match the name of the loader in the .opinion files.
 		return "UNIX A.out executable";
 	}
 	
@@ -405,21 +405,6 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		}
 	}
 	
-	@Override
-	public List<Option> getDefaultOptions(ByteProvider provider, LoadSpec loadSpec,
-			DomainObject domainObject, boolean isLoadIntoProgram) {
-		List<Option> list =
-			super.getDefaultOptions(provider, loadSpec, domainObject, isLoadIntoProgram);
-
-		return list;
-	}
-
-	@Override
-	public String validateOptions(ByteProvider provider, LoadSpec loadSpec, List<Option> options, Program program) {
-
-		return super.validateOptions(provider, loadSpec, options, program);
-	}
-
 	/**
 	 * Reads a single relocation table for either text or data relocations, depending
 	 * on the offset/length provided.
