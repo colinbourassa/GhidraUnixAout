@@ -74,12 +74,10 @@ public class UnixAoutHeader {
         // TODO: In NetBSD/i386 examples of a.out, the 32-bit a_magic/midmag word seems to
         // always be written in big-endian regardless of the data endianness in the rest of
         // the file. Are there other examples of this?
-        /*
         if (isLittleEndian) {
-            this.a_magic = new Integer(this.a_magic).reverseBytes();
+            this.a_magic = Integer.reverseBytes((int)this.a_magic); 
         }
-        */
-
+        
         checkExecutableType();
         checkMachineTypeValidity(isLittleEndian);
         determineTextOffset(isLittleEndian);
@@ -272,9 +270,11 @@ public class UnixAoutHeader {
             this.isNetBSD = true;
         case UnixAoutMachineType.M_386:
         case UnixAoutMachineType.M_386_DYNIX:
+            this.compilerSpec = "gcc";
             this.languageSpec = "x86:LE:32:default";
             break;
         case UnixAoutMachineType.M_X86_64_NETBSD:
+            this.compilerSpec = "gcc";
             this.languageSpec = "x86:LE:64:default";
             break;
 
@@ -426,7 +426,7 @@ public class UnixAoutHeader {
         // header in the .text section. This includes QMAGIC type and some (most? all?)
         // big-endian ZMAGICs.
         else if ((this.exeType == ExecutableType.QMAGIC) ||
-                 (!isLittleEndian && (this.exeType == ExecutableType.ZMAGIC))) {
+                 (this.exeType == ExecutableType.ZMAGIC)) {
             this.txtOffset = 0;
             
         } else {
@@ -461,13 +461,16 @@ public class UnixAoutHeader {
      * (for the segments of nonzero size) fall within the size of the file.
      */
     private boolean areOffsetsValid() {
+        // Note that we can't check the string table validity because, if it
+        // doesn't exist, its offset will be computed to be beyond the end of
+        // the file. The string table is also not given an explicit size in
+        // the header. 
         boolean status =
             ((this.a_text == 0)   || (this.txtOffset    < this.binarySize)  &&
             ((this.a_data == 0)   || (this.datOffset    < this.binarySize)) &&
             ((this.a_trsize == 0) || (this.txtRelOffset < this.binarySize)) &&
             ((this.a_drsize == 0) || (this.datRelOffset < this.binarySize)) &&
-            ((this.a_syms == 0)   || (this.symOffset    < this.binarySize)) &&
-            (this.strOffset <= this.binarySize));
+            ((this.a_syms == 0)   || (this.symOffset    < this.binarySize)));
         return status;
     }
 
