@@ -107,9 +107,6 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 		final long textSize = header.getTextSize();
 		final long dataSize = header.getDataSize();
 		long bssSize = header.getBssSize();
-		
-		// TODO: confirm whether it is appropriate to load OMAGIC A.out files as overlays.
-		// (There may be other magic types that make sense to load as overlays as well.)
 		final boolean isOverlay = (header.getExecutableType() == ExecutableType.OMAGIC);
 		
 		Namespace namespace = null;
@@ -239,63 +236,69 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
         ///////////////////////////////////////
 		for (Integer i = 0; i < textRelocTab.size(); i++) {
 
-			UnixAoutRelocationTableEntry relocationEntry = textRelocTab.elementAt(i);
-			UnixAoutSymbolTableEntry symbolEntry = symTab.elementAt((int)relocationEntry.symbolNum);
-			AddressSpace addrSpace = textBlock.getStart().getAddressSpace();
-			Address relocAddr = addrSpace.getAddress(relocationEntry.address);
-			
-			// If this symbol's N_EXT flag is clear, then we didn't mark it as a function when
-			// we were processing the symbol table (above). This is because special symbols like
-			// "gcc2_compiled", "___gnu_compiled_c", and names of object files are in the symbol
-			// table for this segment, but do not point to disassemblable code. However, since
-			// there is now a reference from the relocation table, we should be able to
-			// disassemble at its address. Save the address for disassembly later.
-			if (!symbolEntry.isExt) {
-				Address funcAddr = textAddrSpace.getAddress(symbolEntry.value);
-				localFunctions.put(funcAddr, symbolEntry.name);
-			}
-			
-			if (relocationEntry.extern && textBlock.contains(relocAddr)) {
+		    UnixAoutRelocationTableEntry relocationEntry = textRelocTab.elementAt(i);
+		    if (relocationEntry.symbolNum < symTab.size()) {
 
-				List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
-				List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
-				List<Symbol> symbolsLocal = api.getSymbols(symbolEntry.name, namespace);
-				
-				if (funcs.size() > 0) {
-					Address funcAddr = funcs.get(0).getEntryPoint();
-					fixAddress(textBlock, relocAddr, funcAddr,
-							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+		        UnixAoutSymbolTableEntry symbolEntry = symTab.elementAt((int)relocationEntry.symbolNum);
+		        AddressSpace addrSpace = textBlock.getStart().getAddressSpace();
+		        Address relocAddr = addrSpace.getAddress(relocationEntry.address + header.getTextAddr());
 
-				} else if (symbolsGlobal.size() > 0) {
-					Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
-					fixAddress(textBlock, relocAddr, globalSymbolAddr,
-							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+		        // If this symbol's N_EXT flag is clear, then we didn't mark it as a function when
+		        // we were processing the symbol table (above). This is because special symbols like
+		        // "gcc2_compiled", "___gnu_compiled_c", and names of object files are in the symbol
+		        // table for this segment, but do not point to disassemblable code. However, since
+		        // there is now a reference from the relocation table, we should be able to
+		        // disassemble at its address. Save the address for disassembly later.
+		        if (!symbolEntry.isExt) {
+		            Address funcAddr = textAddrSpace.getAddress(symbolEntry.value);
+		            localFunctions.put(funcAddr, symbolEntry.name);
+		        }
 
-				} else if (symbolsLocal.size() > 0) {
-					Address localSymbolAddr = symbolsLocal.get(0).getAddress();
-					fixAddress(textBlock, relocAddr, localSymbolAddr,
-							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
-					
-				} else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
-					try {
-						Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
-						long bssSymbolSize = possibleBssSymbols.get(symbolEntry.name);
-						api.createLabel(bssSymbolAddress,
-							symbolEntry.name, namespace, true, SourceType.IMPORTED);
-						fixAddress(textBlock, relocAddr, bssSymbolAddress,
-								relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
-						program.getReferenceManager().addMemoryReference(
-								relocAddr, bssSymbolAddress, RefType.DATA, SourceType.IMPORTED, 0);
-						bssLocation += bssSymbolSize;
-						
-					} catch (Exception e) {
-						e.printStackTrace();
-					}
-				} else {
-					log.appendMsg("Symbol '" + symbolEntry.name +
-						"' was not found and was not a candidate for allocation in .bss.");
-				}
-			}
+		        if (relocationEntry.extern && textBlock.contains(relocAddr)) {
+
+		            List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
+		            List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
+		            List<Symbol> symbolsLocal = api.getSymbols(symbolEntry.name, namespace);
+
+		            if (funcs.size() > 0) {
+		                Address funcAddr = funcs.get(0).getEntryPoint();
+		                fixAddress(textBlock, relocAddr, funcAddr,
+		                        relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+
+		            } else if (symbolsGlobal.size() > 0) {
+		                Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
+		                fixAddress(textBlock, relocAddr, globalSymbolAddr,
+		                        relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+
+		            } else if (symbolsLocal.size() > 0) {
+		                Address localSymbolAddr = symbolsLocal.get(0).getAddress();
+		                fixAddress(textBlock, relocAddr, localSymbolAddr,
+		                        relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+
+		            } else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
+		                try {
+		                    Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
+		                    long bssSymbolSize = possibleBssSymbols.get(symbolEntry.name);
+		                    api.createLabel(bssSymbolAddress,
+		                            symbolEntry.name, namespace, true, SourceType.IMPORTED);
+		                    fixAddress(textBlock, relocAddr, bssSymbolAddress,
+		                            relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+		                    program.getReferenceManager().addMemoryReference(
+		                            relocAddr, bssSymbolAddress, RefType.DATA, SourceType.IMPORTED, 0);
+		                    bssLocation += bssSymbolSize;
+
+		                } catch (Exception e) {
+		                    e.printStackTrace();
+		                }
+		            } else {
+		                log.appendMsg("Symbol '" + symbolEntry.name +
+		                        "' was not found and was not a candidate for allocation in .bss.");
+		            }
+		        }
+		    } else {
+		        log.appendMsg("Symbol number " + relocationEntry.symbolNum +
+		                " is beyond symbol table length of " + symTab.size());
+		    }
 		}
 		
 		///////////////////////////////////////
@@ -303,51 +306,57 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
         ///////////////////////////////////////
 		for (Integer i = 0; i < dataRelocTab.size(); i++) {
 
-			UnixAoutRelocationTableEntry relocationEntry = dataRelocTab.elementAt(i);
-			UnixAoutSymbolTableEntry symbolEntry = symTab.elementAt((int)relocationEntry.symbolNum);
-			AddressSpace addrSpace = dataBlock.getStart().getAddressSpace();
-			Address relocAddr = addrSpace.getAddress(relocationEntry.address);
-						
-			if (dataBlock.contains(relocAddr)) {
-				
-				List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
-				List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
-				List<Symbol> symbolsLocal = api.getSymbols(symbolEntry.name, namespace);
-				
-				if (funcs.size() > 0) {
-					Address funcAddr = funcs.get(0).getEntryPoint();
-					fixAddress(dataBlock, relocAddr, funcAddr,
-							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+		    UnixAoutRelocationTableEntry relocationEntry = dataRelocTab.elementAt(i);
+		    if (relocationEntry.symbolNum < symTab.size()) {
 
-				} else if (symbolsGlobal.size() > 0) {
-					Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
-					fixAddress(dataBlock, relocAddr, globalSymbolAddr,
-							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+		        UnixAoutSymbolTableEntry symbolEntry = symTab.elementAt((int)relocationEntry.symbolNum);
+		        AddressSpace addrSpace = dataBlock.getStart().getAddressSpace();
+		        Address relocAddr = addrSpace.getAddress(relocationEntry.address + header.getDataAddr());
 
-				} else if (symbolsLocal.size() > 0) {
-					Address localSymbolAddr = symbolsLocal.get(0).getAddress();
-					fixAddress(dataBlock, relocAddr, localSymbolAddr,
-							relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
-					
-				} else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
-					try {
-						Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
-						api.createLabel(bssSymbolAddress,
-							symbolEntry.name, namespace, true, SourceType.IMPORTED);
-						fixAddress(dataBlock, relocAddr, bssSymbolAddress,
-								relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
-						program.getReferenceManager().addMemoryReference(
-								relocAddr, bssSymbolAddress, RefType.DATA, SourceType.IMPORTED, 0);
-						bssLocation += possibleBssSymbols.get(symbolEntry.name);
-						
-					} catch (Exception e) {
-						e.printStackTrace();
-					}
-				} else {
-					log.appendMsg("Symbol '" + symbolEntry.name +
-						"' was not found and was not a candidate for allocation in .bss.");
-				}
-			}
+		        if (dataBlock.contains(relocAddr)) {
+
+		            List<Function> funcs = api.getCurrentProgram().getListing().getGlobalFunctions(symbolEntry.name);
+		            List<Symbol> symbolsGlobal = api.getSymbols(symbolEntry.name, null);
+		            List<Symbol> symbolsLocal = api.getSymbols(symbolEntry.name, namespace);
+
+		            if (funcs.size() > 0) {
+		                Address funcAddr = funcs.get(0).getEntryPoint();
+		                fixAddress(dataBlock, relocAddr, funcAddr,
+		                        relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+
+		            } else if (symbolsGlobal.size() > 0) {
+		                Address globalSymbolAddr = symbolsGlobal.get(0).getAddress();
+		                fixAddress(dataBlock, relocAddr, globalSymbolAddr,
+		                        relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+
+		            } else if (symbolsLocal.size() > 0) {
+		                Address localSymbolAddr = symbolsLocal.get(0).getAddress();
+		                fixAddress(dataBlock, relocAddr, localSymbolAddr,
+		                        relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+
+		            } else if (possibleBssSymbols.containsKey(symbolEntry.name)) {
+		                try {
+		                    Address bssSymbolAddress = bssBlock.getStart().getAddressSpace().getAddress(bssLocation);
+		                    api.createLabel(bssSymbolAddress,
+		                            symbolEntry.name, namespace, true, SourceType.IMPORTED);
+		                    fixAddress(dataBlock, relocAddr, bssSymbolAddress,
+		                            relocationEntry.pcRelativeAddressing, bigEndian, relocationEntry.pointerLength);
+		                    program.getReferenceManager().addMemoryReference(
+		                            relocAddr, bssSymbolAddress, RefType.DATA, SourceType.IMPORTED, 0);
+		                    bssLocation += possibleBssSymbols.get(symbolEntry.name);
+
+		                } catch (Exception e) {
+		                    e.printStackTrace();
+		                }
+		            } else {
+		                log.appendMsg("Symbol '" + symbolEntry.name +
+		                        "' was not found and was not a candidate for allocation in .bss.");
+		            }
+		        }
+		    } else {
+	              log.appendMsg("Symbol number " + relocationEntry.symbolNum +
+	                        " is beyond symbol table length of " + symTab.size());
+		    }
 		}
 
 		// Now that all relocation addresses have been rewritten, it's safe to start disassembly
@@ -427,7 +436,7 @@ public class UnixAoutLoader extends AbstractProgramWrapperLoader {
 			while (reader.getPointerIndex() < (offset + len)) {
 				long address = reader.readNextUnsignedInt();
 				long flags = reader.readNextUnsignedInt();
-				relocTable.add(new UnixAoutRelocationTableEntry(address, flags));
+				relocTable.add(new UnixAoutRelocationTableEntry(address, flags, reader.isBigEndian()));
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
